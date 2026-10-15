@@ -93,6 +93,10 @@ const PANEL_CSS = [
   '.wbDraftBody{max-height:180px;overflow-y:auto;font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary)}',
 
   '.wbFooter{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
+  /* Reference footer: one centred muted line with 隐私政策 as an inline link. */
+  '.wbFooterCenter{display:block;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
+  '.wbFooterLink{padding:0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer}',
+  '.wbFooterLink:hover{color:var(--dsw-alias-label-secondary)}',
   '.wbFooterLinks{display:flex;align-items:center;gap:8px}',
   '.wbNote{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
   '.wbError{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px}',
@@ -139,6 +143,8 @@ export const panelCss = {
   draft: 'wbDraft',
   draftBody: 'wbDraftBody',
   footer: 'wbFooter',
+  footerCenter: 'wbFooterCenter',
+  footerLink: 'wbFooterLink',
   footerLinks: 'wbFooterLinks',
   note: 'wbNote',
   error: 'wbError',

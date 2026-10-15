@@ -12,10 +12,10 @@
  */
 
 import * as React from 'react'
-import { Button, IconEditOutlineMedium, MarkdownText, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { REPLY_STYLES } from '../protocol'
 import type { MemorySnapshot } from '../protocol'
-import { Card, ChoiceMenu, EditableCard, Row, TextField } from './cards'
+import { Card, ChoiceMenu, DocumentBody, EditableCard, Row, TextField } from './cards'
 import type { Translate } from './cards'
 import { panelCss as css } from './styles'
 
@@ -66,14 +66,16 @@ export function PersonalizePage({
 
   const cards: React.ReactNode[] = []
 
-  if (matches(query, t('card.userName.title'), t('card.userName.desc')) ||
-      matches(query, t('card.agentName.title'), t('card.agentName.desc'))) {
+  if (matches(query, t('card.userName.title'), '') ||
+      matches(query, t('card.agentName.title'), '')) {
+    // Both identity rows carry no description: the reference draws them as a
+    // bare label + input, so no `cardDesc` line is rendered at all (an empty
+    // string would still leave a div with its own margins).
     cards.push(
-      <Card key="identity" title={t('personalize.title')} description={t('personalize.subtitle')}>
+      <Card key="identity">
         <Row>
           <div className={css.cardText}>
             <div className={css.cardTitle}>{t('card.userName.title')}</div>
-            <div className={css.cardDesc}>{t('card.userName.desc')}</div>
           </div>
           <TextField
             ariaLabel={t('card.userName.title')}
@@ -85,7 +87,6 @@ export function PersonalizePage({
         <Row>
           <div className={css.cardText}>
             <div className={css.cardTitle}>{t('card.agentName.title')}</div>
-            <div className={css.cardDesc}>{t('card.agentName.desc')}</div>
           </div>
           <TextField
             ariaLabel={t('card.agentName.title')}
@@ -102,7 +103,7 @@ export function PersonalizePage({
       matches(query, t('card.welcome.title'), t('card.welcome.desc')) ||
       matches(query, t('card.showFileChanges.title'), t('card.showFileChanges.desc'))) {
     cards.push(
-      <Card key="behaviour" title={t('card.replyStyle.title')} description={t('card.replyStyle.desc')}>
+      <Card key="behaviour">
         <Row>
           <div className={css.cardText}>
             <div className={css.cardTitle}>{t('card.replyStyle.title')}</div>
@@ -153,7 +154,10 @@ export function PersonalizePage({
         description={t('card.instructions.desc')}
         value={instructions?.text ?? ''}
         loading={loading}
+        // The reference shows this card as an EMPTY box whose only text is the
+        // placeholder, so the read-only view falls back to it too.
         placeholder={t('card.instructions.placeholder')}
+        tall
         onSave={saveAt('instructions.md')}
       />,
     )
@@ -267,7 +271,6 @@ export function LongTermCard({
               <Button
                 size="sm"
                 variant="outline"
-                icon={<IconEditOutlineMedium size={14} />}
                 onClick={() => {
                   setPreview(false)
                   setEditing(true)
@@ -281,12 +284,14 @@ export function LongTermCard({
       }
     >
       {editing ? (
-        <textarea
-          className={`${css.editor} ${css.editorTall}`}
-          value={draft}
-          spellCheck={false}
-          aria-label={t('card.longTerm.title')}
-          onChange={event => setDraft(event.currentTarget.value)}
+        <DocumentBody
+          t={t}
+          value={value}
+          draft={draft}
+          onDraft={setDraft}
+          editing
+          tall
+          ariaLabel={t('card.longTerm.title')}
           onKeyDown={event => {
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
               event.preventDefault()
@@ -299,17 +304,18 @@ export function LongTermCard({
           }}
         />
       ) : (
-        <div className={css.prose}>
-          {loading ? (
-            <div className={css.loading}>{t('loading')}</div>
-          ) : value.trim() === '' ? (
-            <div className={css.proseEmpty}>{t('empty')}</div>
-          ) : preview ? (
-            <MarkdownText text={value} />
-          ) : (
-            <pre className={css.draftBody}>{value}</pre>
-          )}
-        </div>
+        <DocumentBody
+          t={t}
+          value={value}
+          draft={draft}
+          onDraft={setDraft}
+          editing={false}
+          loading={loading}
+          renderPreview={preview}
+          tall
+          ariaLabel={t('card.longTerm.title')}
+          bodyTitle={t('card.longTerm.title')}
+        />
       )}
     </Card>
   )

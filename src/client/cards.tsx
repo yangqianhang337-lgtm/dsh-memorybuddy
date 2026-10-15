@@ -19,7 +19,6 @@ import {
   IconCheckOutlineMedium,
   IconChevronDownOutlineMedium,
   IconCloseOutlineMedium,
-  IconEditOutlineMedium,
   IconPinOutlineMedium,
   IconRefreshOutlineMedium,
   IconTrashOutlineMedium,
@@ -41,26 +40,38 @@ export type Translate = (key: string, params?: Record<string, string>) => string
  * ------------------------------------------------------------------ */
 
 export interface CardProps {
-  title: string
+  /**
+   * Card heading, with an optional description under it.
+   *
+   * Omit both for a card whose rows are their own labels: the reference design
+   * headings only the cards that own a document (给 WorkBuddy 的指令 / 人设设定 /
+   * 长期记忆 / 管理记忆). A card of plain setting rows starts straight at the
+   * first row, so repeating its first row's label as a heading would print the
+   * same words twice.
+   */
+  title?: string
   description?: string
   /** Top-right controls (the 编辑 / 保存 / 取消 cluster). */
   actions?: React.ReactNode
   children?: React.ReactNode
 }
 
-/** One titled card. The panel and both settings pages share this frame. */
+/** One card. The panel and both settings pages share this frame. */
 export function Card({ title, description, actions, children }: CardProps): React.ReactElement {
+  const heading = (title !== undefined && title !== '') || actions !== undefined
   return (
     <section className={css.card}>
-      <div className={css.cardHead}>
-        <div className={css.cardText}>
-          <div className={css.cardTitle}>{title}</div>
-          {description !== undefined && description !== '' && (
-            <div className={css.cardDesc}>{description}</div>
-          )}
+      {heading && (
+        <div className={css.cardHead}>
+          <div className={css.cardText}>
+            {title !== undefined && title !== '' && <div className={css.cardTitle}>{title}</div>}
+            {description !== undefined && description !== '' && (
+              <div className={css.cardDesc}>{description}</div>
+            )}
+          </div>
+          {actions !== undefined && <div className={css.cardActions}>{actions}</div>}
         </div>
-        {actions !== undefined && <div className={css.cardActions}>{actions}</div>}
-      </div>
+      )}
       {children}
     </section>
   )
@@ -92,12 +103,123 @@ export interface EditableCardProps {
   /** Extra control rendered next to 编辑 (the preview toggle). */
   extraAction?: React.ReactNode
   /**
+   * Extra control rendered AFTER the 编辑 / 保存 group. The 管理记忆 card uses
+   * both slots so its action row reads 重置 · 编辑 · 导入, which is the order the
+   * reference screenshot draws and the order the plan's table lists.
+   */
+  extraActionEnd?: React.ReactNode
+  /**
    * Controlled edit state. The memory page lifts this so its 管理记忆 card can
    * offer 编辑 for the same document; omitting both props leaves the card
    * self-managed, which is what the 个性化 page uses.
    */
   editing?: boolean
   onEditingChange?: (next: boolean) => void
+}
+
+/* ------------------------------------------------------------------ *
+ * Document body: the editor / prose pane shared by every document card
+ * ------------------------------------------------------------------ */
+
+export interface DocumentBodyProps {
+  t: Translate
+  /** The stored text (used for the read-only view and as the empty check). */
+  value: string
+  /** The text currently in the editor. */
+  draft: string
+  onDraft: (next: string) => void
+  editing: boolean
+  loading?: boolean
+  /** Render the read-only view as prose instead of as raw markdown. */
+  renderPreview?: boolean
+  placeholder?: string
+  tall?: boolean
+  /** Accessible name for the textarea (there is no visible label). */
+  ariaLabel: string
+  /**
+   * The document's own `# …` heading, dropped from the prose view.
+   *
+   * `memory/index.md` opens with `# 长期记忆` and `instructions.md` with `# 指令`
+   * because those files are also read as plain markdown; rendering that H1 inside
+   * a card that already carries the same title prints the words twice. The
+   * textarea keeps the line — editing the file means editing the whole file.
+   */
+  bodyTitle?: string
+  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+}
+
+/**
+ * Drop the leading H1 when it only repeats the card title.
+ *
+ * The comparison is a substring test in either direction, so `# 长期记忆` is
+ * dropped from a card titled 长期记忆 and `# 长期记忆（跨会话）` still matches,
+ * while a heading the user wrote as content (`# 备注`) survives.
+ */
+export function stripLeadingTitle(text: string, bodyTitle: string | undefined): string {
+  if (bodyTitle === undefined || bodyTitle === '') return text
+  const lines = text.split('\n')
+  let index = 0
+  while (index < lines.length && lines[index].trim() === '') index += 1
+  const first = lines[index]
+  if (first === undefined || !first.startsWith('# ')) return text
+  const heading = first.slice(2).trim()
+  if (heading === '') return text
+  if (!heading.includes(bodyTitle) && !bodyTitle.includes(heading)) return text
+  return lines.slice(index + 1).join('\n')
+}
+
+/**
+ * The pane inside a document card: a raw-markdown textarea while editing, a
+ * rendered (or raw) read-only view otherwise.
+ *
+ * It is separate from `EditableCard` because the 管理记忆 card owns its own
+ * action row (重置 · 编辑 · 导入) while showing the very same document body — two
+ * renderings of one document must not drift (memory-plan §2.4).
+ */
+export function DocumentBody({
+  t,
+  value,
+  draft,
+  onDraft,
+  editing,
+  loading = false,
+  renderPreview = false,
+  placeholder,
+  tall = false,
+  ariaLabel,
+  bodyTitle,
+  onKeyDown,
+}: DocumentBodyProps): React.ReactElement {
+  if (editing) {
+    return (
+      <textarea
+        className={cx(css.editor, tall && css.editorTall)}
+        value={draft}
+        placeholder={placeholder}
+        spellCheck={false}
+        onChange={event => onDraft(event.currentTarget.value)}
+        {...(onKeyDown === undefined ? {} : { onKeyDown })}
+        aria-label={ariaLabel}
+      />
+    )
+  }
+  return (
+    <div className={css.prose}>
+      {loading ? (
+        <div className={css.loading}>{t('loading')}</div>
+      ) : value.trim() === '' ? (
+        // An empty document shows its placeholder when it has one: the reference
+        // draws 「给 WorkBuddy 的指令」 as a box whose only text is the example.
+        <div className={css.proseEmpty}>
+          {placeholder === undefined || placeholder === '' ? t('empty') : placeholder}
+        </div>
+      ) : renderPreview ? (
+        <MarkdownText text={stripLeadingTitle(value, bodyTitle)} />
+      ) : (
+        <pre className={css.draftBody}>{value}</pre>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -118,6 +240,7 @@ export function EditableCard({
   tall = false,
   onSave,
   extraAction,
+  extraActionEnd,
   editing: editingProp,
   onEditingChange,
 }: EditableCardProps): React.ReactElement {
@@ -187,40 +310,41 @@ export function EditableCard({
               </Button>
             </>
           ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<IconEditOutlineMedium size={14} />}
-              onClick={() => setEditing(true)}
-            >
+            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
               {t('action.edit')}
             </Button>
           )}
+          {extraActionEnd}
         </>
       }
     >
       {editing ? (
-        <textarea
-          className={cx(css.editor, tall && css.editorTall)}
-          value={draft}
-          placeholder={placeholder}
-          spellCheck={false}
-          onChange={event => setDraft(event.currentTarget.value)}
+        <DocumentBody
+          t={t}
+          value={value}
+          draft={draft}
+          onDraft={setDraft}
+          editing
+          tall={tall}
+          ariaLabel={title}
+          bodyTitle={title}
+          {...(placeholder === undefined ? {} : { placeholder })}
           onKeyDown={onKeyDown}
-          aria-label={title}
         />
       ) : (
-        <div className={css.prose}>
-          {loading ? (
-            <div className={css.loading}>{t('loading')}</div>
-          ) : value.trim() === '' ? (
-            <div className={css.proseEmpty}>{t('empty')}</div>
-          ) : renderPreview ? (
-            <MarkdownText text={value} />
-          ) : (
-            <pre className={css.draftBody}>{value}</pre>
-          )}
-        </div>
+        <DocumentBody
+          t={t}
+          value={value}
+          draft={draft}
+          onDraft={setDraft}
+          editing={false}
+          loading={loading}
+          renderPreview={renderPreview}
+          tall={tall}
+          ariaLabel={title}
+          bodyTitle={title}
+          {...(placeholder === undefined ? {} : { placeholder })}
+        />
       )}
     </Card>
   )

@@ -10,12 +10,12 @@
  */
 
 import * as React from 'react'
-import { Button, IconEditOutlineMedium, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Banner,
   Card,
   Confirm,
-  EditableCard,
+  DocumentBody,
   EntryList,
   Row,
   ToastHost,
@@ -34,6 +34,17 @@ export interface MemoryPageProps {
   onPatch: (patch: Record<string, unknown>) => void
   onSaveDocument: (path: string, text: string, revision: string) => Promise<boolean>
   onAction: (action: Record<string, unknown>) => Promise<boolean>
+  /**
+   * Render the page heading (title + schedule line). The first-level panel keeps
+   * it because that drop has no nav label of ours; the Settings drop passes
+   * false, because the reference draws no heading above the cards.
+   */
+  heading?: boolean
+  /**
+   * Render without the panel's own scroll container, for the Settings drop: the
+   * shell already supplies the options column's padding and scrolling there.
+   */
+  bare?: boolean
 }
 /** Topic display name, falling back to the raw key for an unknown topic. */
 function topicTitle(t: Translate, key: string): string {
@@ -103,6 +114,8 @@ export function MemoryPage({
   onPatch,
   onSaveDocument,
   onAction,
+  heading = true,
+  bare = false,
 }: MemoryPageProps): React.ReactElement {
   const [toast, setToast] = React.useState<{ token: number; text: string; tone?: 'success' | 'danger' }>({
     token: 0,
@@ -111,7 +124,7 @@ export function MemoryPage({
   const [resetOpen, setResetOpen] = React.useState(false)
   const [forget, setForget] = React.useState<{ topic: string; id: string } | undefined>(undefined)
   const [indexEditing, setIndexEditing] = React.useState(false)
-  const [preview, setPreview] = React.useState(true)
+  const [indexDraft, setIndexDraft] = React.useState('')
   const fileRef = React.useRef<HTMLInputElement | null>(null)
 
   const say = React.useCallback(
@@ -219,6 +232,18 @@ export function MemoryPage({
     [index, onSaveDocument, say, t],
   )
 
+  /** Save the 管理记忆 document through the revision-checked host route. */
+  const saveIndex = React.useCallback(async (): Promise<void> => {
+    const ok = await onSaveDocument('memory/index.md', indexDraft, index?.revision ?? '')
+    say(ok ? t('toast.saved') : t('toast.failed'), ok ? 'success' : 'danger')
+    if (ok) setIndexEditing(false)
+  }, [index, indexDraft, onSaveDocument, say, t])
+
+  const cancelIndex = React.useCallback((): void => {
+    setIndexDraft(index?.text ?? '')
+    setIndexEditing(false)
+  }, [index])
+
   const copyRoot = React.useCallback(async (): Promise<void> => {
     const root = snapshot?.root ?? ''
     try {
@@ -232,11 +257,11 @@ export function MemoryPage({
   const openPrivacy = React.useCallback((): void => {
     // No shell bridge is reachable from the page, so the honest move is to show
     // the rule that actually governs this data rather than a dead link.
-    say(t('memory.footer'))
+    say(`${t('memory.footerLead')}${t('memory.privacyPolicy')}${t('memory.footerTail')}`)
   }, [say, t])
 
   return (
-    <div className={css.content}>
+    <div className={bare ? css.section : css.content}>
       {drafts.length > 0 && (
         <Banner
           text={t('draft.banner', { count: String(drafts.length) })}
@@ -248,31 +273,26 @@ export function MemoryPage({
         />
       )}
 
-      <div>
-        <div className={css.title}>{t('memory.title')}</div>
-        <div className={css.subtitle}>
-          {t('memory.subtitle')} · {t('memory.last')}：
-          {snapshot?.consolidation.lastAt ?? t('memory.never')} · {t('memory.next')}：
-          {scheduleLine(t, snapshot)}
-          {snapshot !== undefined && snapshot.sessions.pending > 0
-            ? ` · ${t('memory.pending', { count: String(snapshot.sessions.pending) })}`
-            : ''}
+      {/*
+        `heading` is false in the Settings drop: the shell supplies its own nav
+        row there and the reference draws no page heading above the cards. The
+        first-level panel keeps it, because that drop has no nav label of ours.
+      */}
+      {heading && (
+        <div>
+          <div className={css.title}>{t('memory.title')}</div>
+          <div className={css.subtitle}>
+            {t('memory.subtitle')} · {t('memory.last')}：
+            {snapshot?.consolidation.lastAt ?? t('memory.never')} · {t('memory.next')}：
+            {scheduleLine(t, snapshot)}
+            {snapshot !== undefined && snapshot.sessions.pending > 0
+              ? ` · ${t('memory.pending', { count: String(snapshot.sessions.pending) })}`
+              : ''}
+          </div>
         </div>
-      </div>
+      )}
 
-      <Card
-        title={t('memory.card.toggles')}
-        actions={
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void consolidate()}
-          >
-            {t('action.consolidate')}
-          </Button>
-        }
-      >
+      <Card>
         <Row>
           <div className={css.cardText}>
             <div className={css.cardTitle}>{t('card.conversationMemory.title')}</div>
@@ -297,21 +317,14 @@ export function MemoryPage({
             onChange={next => patchPreference('localMemorySkills', next)}
           />
         </Row>
-        <Row>
-          <div className={css.cardText}>
-            <div className={css.cardTitle}>{t('card.consolidateQuiet.title')}</div>
-            <div className={css.cardDesc}>{t('card.consolidateQuiet.desc')}</div>
-          </div>
-          <Switch
-            label={t('card.consolidateQuiet.title')}
-            checked={preferences?.consolidateQuiet ?? true}
-            disabled={busy || loading}
-            onChange={next => patchPreference('consolidateQuiet', next)}
-          />
-        </Row>
-        <div className={css.note}>{t('memory.modelStage')}</div>
       </Card>
 
+      {/*
+        The 管理记忆 card carries both the document and the controls that act on
+        it: the reference screenshot draws 重置 · 编辑 · 导入 on the header and the
+        rendered index right below, so the index is NOT a second card here (the
+        个性化 page is where 长期记忆 stands alone).
+      */}
       <Card
         title={t('card.manage.title')}
         description={t('card.manage.desc')}
@@ -320,18 +333,28 @@ export function MemoryPage({
             <Button size="sm" variant="outline" disabled={busy} onClick={() => setResetOpen(true)}>
               {t('action.reset')}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<IconEditOutlineMedium size={14} />}
-              disabled={busy}
-              onClick={() => {
-                setPreview(false)
-                setIndexEditing(true)
-              }}
-            >
-              {t('action.edit')}
-            </Button>
+            {indexEditing ? (
+              <>
+                <Button size="sm" variant="primary" disabled={busy} onClick={() => void saveIndex()}>
+                  {t('action.save')}
+                </Button>
+                <Button size="sm" variant="outline" disabled={busy} onClick={cancelIndex}>
+                  {t('action.cancel')}
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setIndexDraft(index?.text ?? '')
+                  setIndexEditing(true)
+                }}
+              >
+                {t('action.edit')}
+              </Button>
+            )}
             <Button size="sm" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
               {t('action.import')}
             </Button>
@@ -346,7 +369,62 @@ export function MemoryPage({
           aria-label={t('action.import')}
           onChange={event => void onFilePicked(event)}
         />
+        <DocumentBody
+          t={t}
+          value={index?.text ?? ''}
+          draft={indexDraft}
+          onDraft={setIndexDraft}
+          editing={indexEditing}
+          loading={loading}
+          renderPreview
+          tall
+          ariaLabel={t('card.manage.title')}
+          bodyTitle={t('card.longTerm.title')}
+          onKeyDown={event => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+              event.preventDefault()
+              void saveIndex()
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              cancelIndex()
+            }
+          }}
+        />
         <div className={css.note}>{snapshot?.root ?? ''}</div>
+      </Card>
+
+      {/*
+        整理时机: the schedule and the manual pass. The reference has no seat for
+        them in the switch card, and the plan's §2.4 table puts the timing line
+        with the 管理记忆 card rather than inventing a row among the switches.
+      */}
+      <Card title={t('memory.schedule')}>
+        <Row>
+          <div className={css.cardText}>
+            <div className={css.cardTitle}>{t('memory.last')}</div>
+            <div className={css.cardDesc}>
+              {snapshot?.consolidation.lastAt ?? t('memory.never')} · {t('memory.next')}：
+              {scheduleLine(t, snapshot)}
+            </div>
+          </div>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void consolidate()}>
+            {t('action.consolidate')}
+          </Button>
+        </Row>
+        <Row>
+          <div className={css.cardText}>
+            <div className={css.cardTitle}>{t('card.consolidateQuiet.title')}</div>
+            <div className={css.cardDesc}>{t('card.consolidateQuiet.desc')}</div>
+          </div>
+          <Switch
+            label={t('card.consolidateQuiet.title')}
+            checked={preferences?.consolidateQuiet ?? true}
+            disabled={busy || loading}
+            onChange={next => patchPreference('consolidateQuiet', next)}
+          />
+        </Row>
+        <div className={css.note}>{t('memory.modelStage')}</div>
       </Card>
 
       <DraftCards
@@ -365,39 +443,11 @@ export function MemoryPage({
         }}
       />
 
-      <EditableCard
-        title={t('card.longTerm.title')}
-        description={t('card.longTerm.desc')}
-        t={t}
-        value={index?.text ?? ''}
-        loading={loading}
-        renderPreview={preview}
-        tall
-        editing={indexEditing}
-        onEditingChange={setIndexEditing}
-        extraAction={
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-pressed={preview}
-            disabled={indexEditing}
-            onClick={() => setPreview(current => !current)}
-          >
-            {preview ? t('action.preview') : t('action.raw')}
-          </Button>
-        }
-        onSave={async text => {
-          const ok = await onSaveDocument('memory/index.md', text, index?.revision ?? '')
-          say(ok ? t('toast.saved') : t('toast.failed'), ok ? 'success' : 'danger')
-          return ok
-        }}
-      />
-
       <div>
         <div className={css.cardTitle}>{t('memory.entries')}</div>
         <div className={css.subtitle}>
           {needle === '' ? '' : `${t('memory.hits', { count: String(hitCount) })} · `}
-          {t('memory.modelStage')}
+          {t('memory.entriesHint')}
         </div>
       </div>
 
@@ -439,17 +489,35 @@ export function MemoryPage({
         )}
       </Card>
 
-      <div className={css.footer}>
-        <span>{t('memory.footer')}</span>
-        <div className={css.footerLinks}>
-          <Button size="sm" variant="outline" onClick={() => void copyRoot()}>
-            {t('action.copyPath')}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={openPrivacy}>
-            {t('action.privacy')}
-          </Button>
+      {/*
+        The Settings drop reproduces the reference footer exactly: one centred
+        muted line with 隐私政策 as an inline link. The panel adds the plan's
+        §2.4 actions (复制路径 / 查看隐私规则) because that drop is ours to shape.
+      */}
+      {bare ? (
+        <div className={css.footerCenter}>
+          {t('memory.footerLead')}
+          <button className={css.footerLink} onClick={openPrivacy}>
+            {t('memory.privacyPolicy')}
+          </button>
+          {t('memory.footerTail')}
         </div>
-      </div>
+      ) : (
+        <div className={css.footer}>
+          <span>
+            {t('memory.footerLead')}
+            <button className={css.footerLink} onClick={openPrivacy}>
+              {t('memory.privacyPolicy')}
+            </button>
+            {t('memory.footerTail')}
+          </span>
+          <div className={css.footerLinks}>
+            <Button size="sm" variant="outline" onClick={() => void copyRoot()}>
+              {t('action.copyPath')}
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Confirm
         open={resetOpen}

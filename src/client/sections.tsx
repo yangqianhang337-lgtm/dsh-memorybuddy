@@ -15,20 +15,10 @@
  */
 
 import * as React from 'react'
-import { Button, IconEditOutlineMedium, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
-import {
-  Banner,
-  Card,
-  Confirm,
-  EditableCard,
-  EntryList,
-  Row,
-  ToastHost,
-} from './cards.tsx'
+import { MemoryPage } from './memory.tsx'
 import { PersonalizePage } from './personalize.tsx'
 import { t } from './t.ts'
 import type { MemoryFace } from './service.ts'
-import { TOPICS, type DraftView, type MemorySnapshot } from '../protocol.ts'
 import { panelCss as css } from './styles.ts'
 
 /**
@@ -49,16 +39,16 @@ export const MEMORY_SECTION_ID = 'workbuddy-memory'
 /**
  * 个性化 as a native settings page.
  *
- * The panel's search box had no seat here, so the page passes an empty query and
- * shows every card, exactly as the Settings dialog's other sections do.
+ * The page reuses `PersonalizePage` verbatim — one component, two drops — but
+ * renders NO heading: the reference screenshot draws the first card directly at
+ * the top of the options column, and the Settings nav row above already names
+ * the page. The search box has no seat here either, so the query stays empty.
  */
 export function PersonalizeSettingsSection(props: SettingsSectionProps): React.ReactElement {
   const { face } = props
   const view = face.useView()
   return (
     <div className={css.section}>
-      <div className={css.title}>{t('personalize.title')}</div>
-      <div className={css.subtitle}>{t('personalize.subtitle')}</div>
       <PersonalizePage
         t={t}
         snapshot={view.snapshot}
@@ -72,223 +62,31 @@ export function PersonalizeSettingsSection(props: SettingsSectionProps): React.R
   )
 }
 
-/** 记忆与进化 as a native settings page: the switches, the management card, the body. */
+/**
+ * 记忆与进化 as a native settings page.
+ *
+ * Same component as the panel drop, with `bare` set: the shell supplies the
+ * options column's padding and scrolling, and the page omits its own heading
+ * and its 复制路径 button so the page ends exactly as the reference does — on the
+ * single centred privacy line. The panel keeps that button because that drop is
+ * ours to shape (memory-plan §2.4).
+ */
 export function MemorySettingsSection(props: SettingsSectionProps): React.ReactElement {
   const { face } = props
   const view = face.useView()
-  const { snapshot, loading, busy } = view
-  const { onPatch, onSaveDocument, onAction } = face
-  const [toast, setToast] = React.useState<{ token: number; text: string; tone?: 'success' | 'danger' }>({
-    token: 0,
-    text: '',
-  })
-  const [resetOpen, setResetOpen] = React.useState(false)
-  const [indexEditing, setIndexEditing] = React.useState(false)
-  const [preview, setPreview] = React.useState(true)
-
-  const say = React.useCallback((text: string, tone?: 'success' | 'danger'): void => {
-    setToast(current => ({ token: current.token + 1, text, ...(tone === undefined ? {} : { tone }) }))
-  }, [])
-
-  const preferences = snapshot?.preferences
-  const index = snapshot?.index
-  const drafts: DraftView[] = snapshot?.drafts ?? []
-
-  const consolidate = React.useCallback(async (): Promise<void> => {
-    const ok = await onAction({ kind: 'consolidate' })
-    say(ok ? t('toast.consolidated') : t('toast.failed'), ok ? 'success' : 'danger')
-  }, [onAction, say, t])
-
-  const doReset = React.useCallback(async (): Promise<void> => {
-    setResetOpen(false)
-    const ok = await onAction({ kind: 'reset-document', path: 'memory/index.md' })
-    say(ok ? t('toast.reset') : t('toast.failed'), ok ? 'success' : 'danger')
-  }, [onAction, say, t])
-
-  const matched = React.useMemo(() => {
-    const groups: Array<{ key: string; items: MemorySnapshot['entries'][string] }> = []
-    for (const topic of TOPICS) {
-      const items = snapshot?.entries[topic.key] ?? []
-      if (items.length > 0) groups.push({ key: topic.key, items })
-    }
-    return groups
-  }, [snapshot])
-
   return (
-    <div className={css.section}>
-      {drafts.length > 0 && <Banner text={t('draft.banner', { count: String(drafts.length) })} />}
-
-      <div className={css.title}>{t('memory.title')}</div>
-      <div className={css.subtitle}>
-        {t('memory.subtitle')} · {t('memory.last')}：{snapshot?.consolidation.lastAt ?? t('memory.never')}
-      </div>
-
-      <Card
-        title={t('memory.card.toggles')}
-        actions={
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void consolidate()}>
-            {t('action.consolidate')}
-          </Button>
-        }
-      >
-        <Row>
-          <div className={css.cardText}>
-            <div className={css.cardTitle}>{t('card.conversationMemory.title')}</div>
-            <div className={css.cardDesc}>{t('card.conversationMemory.desc')}</div>
-          </div>
-          <Switch
-            label={t('card.conversationMemory.title')}
-            checked={preferences?.conversationMemory ?? true}
-            disabled={busy || loading}
-            onChange={next => onPatch({ conversationMemory: next })}
-          />
-        </Row>
-        <Row>
-          <div className={css.cardText}>
-            <div className={css.cardTitle}>{t('card.localMemorySkills.title')}</div>
-            <div className={css.cardDesc}>{t('card.localMemorySkills.desc')}</div>
-          </div>
-          <Switch
-            label={t('card.localMemorySkills.title')}
-            checked={preferences?.localMemorySkills ?? true}
-            disabled={busy || loading}
-            onChange={next => onPatch({ localMemorySkills: next })}
-          />
-        </Row>
-        <div className={css.note}>{t('memory.modelStage')}</div>
-      </Card>
-
-      <Card
-        title={t('card.manage.title')}
-        description={t('card.manage.desc')}
-        actions={
-          <>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => setResetOpen(true)}>
-              {t('action.reset')}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              icon={<IconEditOutlineMedium size={14} />}
-              disabled={busy}
-              onClick={() => {
-                setPreview(false)
-                setIndexEditing(true)
-              }}
-            >
-              {t('action.edit')}
-            </Button>
-          </>
-        }
-      >
-        <div className={css.note}>{snapshot?.root ?? ''}</div>
-      </Card>
-
-      {drafts.map(draft => (
-        <Card
-          key={draft.name}
-          title={draft.title}
-          description={`${t('draft.source')} · ${t('draft.repeats', { count: String(draft.repeats) })}`}
-          actions={
-            <>
-              <Button
-                size="sm"
-                variant="primary"
-                disabled={busy}
-                onClick={() => {
-                  void onAction({ kind: 'approve-draft', name: draft.name }).then(ok =>
-                    say(ok ? t('toast.approved') : t('toast.failed'), ok ? 'success' : 'danger'),
-                  )
-                }}
-              >
-                {t('action.approve')}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  void onAction({ kind: 'discard-draft', name: draft.name }).then(ok =>
-                    say(ok ? t('toast.discarded') : t('toast.failed'), ok ? 'success' : 'danger'),
-                  )
-                }}
-              >
-                {t('action.discard')}
-              </Button>
-            </>
-          }
-        >
-          <div className={css.note}>{draft.path}</div>
-        </Card>
-      ))}
-
-      <EditableCard
-        title={t('card.longTerm.title')}
-        description={t('card.longTerm.desc')}
-        t={t}
-        value={index?.text ?? ''}
-        loading={loading}
-        renderPreview={preview}
-        tall
-        editing={indexEditing}
-        onEditingChange={setIndexEditing}
-        extraAction={
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-pressed={preview}
-            disabled={indexEditing}
-            onClick={() => setPreview(current => !current)}
-          >
-            {preview ? t('action.preview') : t('action.raw')}
-          </Button>
-        }
-        onSave={async text => {
-          const ok = await onSaveDocument('memory/index.md', text, index?.revision ?? '')
-          say(ok ? t('toast.saved') : t('toast.failed'), ok ? 'success' : 'danger')
-          return ok
-        }}
-      />
-
-      {matched.map(group => (
-        <Card key={group.key} title={t(`topic.${group.key}`)}>
-          <EntryList
-            entries={group.items}
-            topicTitle={t(`topic.${group.key}`)}
-            t={t}
-            onForget={id => {
-              void onAction({ kind: 'forget-entry', topic: group.key, id }).then(ok =>
-                say(ok ? t('toast.forgotten') : t('toast.failed'), ok ? 'success' : 'danger'),
-              )
-            }}
-            onPin={(id, pinned) => {
-              void onAction({ kind: 'pin-entry', topic: group.key, id, pinned })
-            }}
-          />
-        </Card>
-      ))}
-
-      <div className={css.footer}>
-        <span>{t('memory.footer')}</span>
-      </div>
-
-      <Confirm
-        open={resetOpen}
-        title={t('confirm.reset.title')}
-        body={t('confirm.reset.body')}
-        confirmLabel={t('confirm.reset.ok')}
-        cancelLabel={t('action.cancel')}
-        onConfirm={() => void doReset()}
-        onCancel={() => setResetOpen(false)}
-      />
-
-      <ToastHost
-        token={toast.token}
-        text={toast.text}
-        {...(toast.tone === undefined ? {} : { tone: toast.tone })}
-        onDone={() => setToast(current => ({ ...current, text: '' }))}
-      />
-    </div>
+    <MemoryPage
+      t={t}
+      snapshot={view.snapshot}
+      loading={view.loading}
+      busy={view.busy}
+      query=""
+      onPatch={face.onPatch}
+      onSaveDocument={face.onSaveDocument}
+      onAction={face.onAction}
+      heading={false}
+      bare
+    />
   )
 }
 

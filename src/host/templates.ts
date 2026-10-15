@@ -75,17 +75,19 @@ export function profileTemplate(now: string): string {
   )
 }
 
-/** `instructions.md`. */
+/**
+ * `instructions.md` — the user's own standing orders.
+ *
+ * The body is EMPTY on purpose. Earlier revisions shipped an explanatory
+ * skeleton here, which had two defects: it was injected into every conversation
+ * as 【用户指令】 (the section renders the file body, so boilerplate arrived as if
+ * the user had ordered it — the persona sentence and this file are the two
+ * halves of the prompt that are quoted verbatim), and it printed inside the
+ * 「给 WorkBuddy 的指令」 card where the reference screenshot draws an empty box
+ * showing the placeholder. The panel's placeholder now carries the explanation.
+ */
 export function instructionsTemplate(now: string): string {
-  return renderDocument(
-    { kind: 'instructions', schema: 1, updated: now },
-    [
-      '# 指令',
-      '',
-      '写在这里的要求会被注入每次对话的系统提示，优先级高于自动积累的记忆。',
-      '（当前为空：还没有写下任何长期指令。）',
-    ].join('\n'),
-  )
+  return renderDocument({ kind: 'instructions', schema: 1, updated: now }, '')
 }
 
 /** The four index sections, in the order memory-plan §4.5 fixes. */
