@@ -1,0 +1,11 @@
+# WorkBuddy 记忆插件的 profile 装载层。
+#
+# 这一行把插件同时挂上两面：
+#   - 宿主半边（`exports["."]` → lib/index.js）在 Node 进程里跑，负责记忆落盘与路由；
+#   - 浏览器半边（`dsh.client` → `exports["./client"]` → lib/client.js）由 web 载体
+#     在 `/plugins/dsh-workbuddy-memory/client.js` 提供给 GUI。
+#
+# 记忆数据不在本仓库里，而在 `$DSH_HOME/dsh-workbuddy-memory/`。
+- insert:
+    - id: workbuddy-memory
+      name: 'dsh-workbuddy-memory'

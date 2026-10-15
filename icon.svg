@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none"
+     stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <!-- 记忆卡片：一叠记忆 + 一枚书签，表示「被记住并会随会话成长」。 -->
+  <rect x="2.5" y="2" width="11" height="12" rx="1.6" />
+  <path d="M5 5.2h6M5 7.8h6M5 10.4h3.4" />
+</svg>

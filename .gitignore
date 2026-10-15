@@ -1,0 +1,27 @@
+# 依赖与构建缓存
+node_modules/
+
+# 开发期取证材料：从 DSH 应用包中提取的参考源码与笔记，不随仓库发布
+.refs/
+.probe-notes/
+
+# 临时探针与转储文件（tools/_probe*.mjs 是刻意保留的工具，不在此列）
+.tmp-*
+tmp/
+*.log
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# 本地记忆数据绝不在仓库内（数据在 $DSH_HOME/dsh-workbuddy-memory/）。
+# 若你把 DSH_HOME 指到了本仓库目录，下面这行可以兜底。
+dsh-workbuddy-memory/
+
+# 注意：lib/ 是刻意提交的构建产物。
+# 目的：让 `git clone` 后无需安装任何 devDependency 即可直接装载运行，
+# 与 DSH 生态中其它已发布插件（如 ui-task-board）的做法一致。
+# 源码在 src/，`npm run build` 可随时重新生成 lib/。
