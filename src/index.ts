@@ -44,12 +44,31 @@ const PACKAGE_NAME = 'dsh-workbuddy-memory'
 /**
  * Services the host half cannot work without.
  *
- * All four are installed by `@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app`
- * in every composition that can show the panel at all: without `webServer`
- * there is no GUI to talk to, without `systemPrompt` there is nothing to
- * inject into, and `agents` / `commands` are the session and command registries.
+ * Three of the four are installed by `@deepseek-ai/dsh-base` in EVERY
+ * composition: `systemPrompt` is where memory is injected, and `agents` /
+ * `commands` are the session and command registries.
+ *
+ * `webServer` is deliberately NOT listed, for two independent reasons:
+ *
+ * 1. It only exists where a GUI does (`@deepseek-ai/dsh-web-app`), and a hard
+ *    `inject` on an absent service leaves the whole plugin PENDING — no
+ *    collector, no tools, no injection — in every headless composition (CLI
+ *    runs, the capture-only test context). Memory is at its most useful in
+ *    exactly those runs. See memory-plan.md:569.
+ * 2. `webServer` is a SCOPED service: it is invisible to the top-level context
+ *    even when it is installed. A probe plugin declaring
+ *    `inject = ['systemPrompt','agents','commands']` in a full GUI composition
+ *    saw `tools` / `llm` / `skills` / `timer` resolve through `ctx.get()` while
+ *    `ctx.get('webServer')` stayed `undefined`; the same plugin reached the
+ *    service — and registered a working route — only inside
+ *    `ctx.inject(['webServer'], scoped => …)`. A `ctx.get` soft probe therefore
+ *    skips registration SILENTLY in every host, GUI included.
+ *
+ * The scoped inject below is what makes both true at once: the callback runs
+ * only when the service is composed (so a headless run is unaffected), and it
+ * receives a context that can actually see `webServer`.
  */
-export const inject = ['systemPrompt', 'webServer', 'agents', 'commands']
+export const inject = ['systemPrompt', 'agents', 'commands']
 
 /** The three tool names of memory-plan §5.5, in registration order. */
 export const MEMORY_TOOL_NAMES = ['workbuddy_memory', 'workbuddy_remember', 'workbuddy_forget'] as const
@@ -114,7 +133,6 @@ interface HostContext {
   provide?(name: string, value: unknown): void
   inject?(names: readonly string[], callback: (scoped: HostContext) => unknown): unknown
   systemPrompt: SystemPromptLike
-  webServer: WebServerLike
   agents: AgentsLike
   commands: CommandsLike
   logger?: { info?: (message: string) => void; warn?: (message: string) => void }
@@ -506,22 +524,64 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
 
   ctx.effect?.(() => {
     const disposers: Disposer[] = []
-    try {
-      for (const route of routes) {
-        const off = ctx.webServer.register(route)
-        if (typeof off === 'function') disposers.push(off as Disposer)
+    let torn = false
+
+    /*
+     * Register through a SCOPED inject, not through `ctx.get`:
+     *
+     * - `ctx.inject` runs the callback only when `webServer` is actually
+     *   composed, so a headless profile keeps working with no route at all
+     *   instead of the whole plugin going pending (probe A/B).
+     * - Only the scoped context can see `webServer`; the top-level `get()`
+     *   returns `undefined` for it even in a full GUI composition (probe B),
+     *   which is why the previous `ctx.get` probe skipped registration
+     *   silently everywhere.
+     *
+     * The callback fires asynchronously — measured: the effect body returns
+     * BEFORE it runs — so teardown has to cope with both orderings: routes
+     * registered after the effect was disposed are rolled back immediately,
+     * and routes registered before it are closed by the returned disposer.
+     */
+    const register = (scoped: HostContext): void => {
+      const server = (typeof scoped.get === 'function' ? scoped.get('webServer') : undefined) as
+        | WebServerLike
+        | undefined
+      if (server === undefined || typeof server.register !== 'function') {
+        log('未检测到 webServer，跳过 HTTP 路由注册（记忆与工具照常工作）')
+        return
       }
-    } catch (error) {
-      for (const off of disposers.splice(0)) {
-        try {
-          off()
-        } catch {
-          // Ignore: the mount is failing anyway.
+      const owned: Disposer[] = []
+      try {
+        for (const route of routes) {
+          const off = server.register(route)
+          if (typeof off === 'function') owned.push(off as Disposer)
         }
+      } catch (error) {
+        for (const off of owned.splice(0)) {
+          try {
+            off()
+          } catch {
+            // Ignore: the mount is failing anyway.
+          }
+        }
+        throw error
       }
-      throw error
+      if (torn) {
+        // Disposed while the callback was in flight: never leak the routes.
+        for (const off of owned.splice(0)) off()
+        return
+      }
+      disposers.push(...owned)
     }
+
+    if (typeof ctx.inject !== 'function') {
+      log('未检测到 ctx.inject，跳过 HTTP 路由注册（记忆与工具照常工作）')
+      return undefined
+    }
+    ctx.inject(['webServer'], register)
+
     return () => {
+      torn = true
       for (const off of disposers.splice(0)) off()
     }
   }, `${PACKAGE_NAME}: http routes`)

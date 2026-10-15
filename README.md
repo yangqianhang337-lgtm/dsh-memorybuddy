@@ -247,6 +247,23 @@ Remove-Item "$env:DSH_HOME\dsh-workbuddy-memory" -Recurse -Force
 
 ---
 
+## 运行环境
+
+宿主半边只在 `inject` 里声明**必然存在**的服务（`systemPrompt` / `agents` / `commands`）；
+`webServer`、`tools`、`llm` 都是可选的，用 `ctx.get()` 软探测，缺了就跳过对应的那部分能力。
+
+因此它在有 GUI 和无 GUI 的组合里都能装载：
+
+| 组合 | HTTP 路由 | 采集 | 工具 | 记忆注入 |
+| --- | --- | --- | --- | --- |
+| DSH Desktop / `dsh web` | ✅ | ✅ | ✅ | ✅ |
+| `dsh headless`（无 `webServer`） | 跳过 | ✅ | ✅ | ✅ |
+
+> 注：Cordis 的 context 是代理，读取任何未在 `inject` 中声明的属性都会抛错，
+> 所以可选服务只能通过 `ctx.get(name)` 取得——直接写 `ctx.webServer` 会在无头组合里让 `apply` 失败。
+
+---
+
 ## 许可
 
 [MIT](LICENSE)

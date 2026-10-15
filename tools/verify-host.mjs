@@ -64,9 +64,48 @@ const tools = new Map()
 const effects = []
 const listeners = new Map()
 
+/** Services the plugin reaches through `ctx.get(name)` rather than `inject`. */
+const optional = {
+  tools: {
+    register(definition) {
+      tools.set(definition.name, definition)
+      return () => {}
+    },
+    get: name => tools.get(name),
+  },
+}
+
+/** The `webServer` service, reachable ONLY through a scoped inject. */
+const webServer = {
+  register(route) {
+    routes.set(`${route.kind} ${route.path}`, route)
+    return () => {}
+  },
+}
+
 const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {} },
-  get: () => undefined,
+  // Services NOT listed in the plugin's `inject` are reachable only through
+  // `get()` — the real Cordis context is a proxy that throws on most other
+  // properties. Modelling that here is what makes this test able to catch the
+  // "cannot get property X without inject" class of bug, which it previously
+  // missed because the stub exposed webServer as a plain property.
+  //
+  // `webServer` is deliberately ABSENT from this map, because it is a SCOPED
+  // service: measured against a real GUI composition, a probe plugin declaring
+  // `inject = ['systemPrompt','agents','commands']` saw `tools` / `llm` /
+  // `skills` / `timer` resolve here while `get('webServer')` stayed undefined
+  // and only `ctx.inject(['webServer'], …)` reached it. A stub that answered
+  // `get('webServer')` therefore hid a real defect: the plugin registered no
+  // routes at all in a live host while this test stayed green.
+  get(name) {
+    return optional[name]
+  },
+  inject(names, callback) {
+    const scoped = { ...ctx, get: name => (name === 'webServer' ? webServer : optional[name]) }
+    if (names.includes('webServer')) callback(scoped)
+    return () => {}
+  },
   on(name, listener) {
     listeners.set(name, listener)
     return () => {}
@@ -79,12 +118,6 @@ const ctx = {
   systemPrompt: {
     section(options) {
       sections.push(options)
-      return () => {}
-    },
-  },
-  webServer: {
-    register(route) {
-      routes.set(`${route.kind} ${route.path}`, route)
       return () => {}
     },
   },

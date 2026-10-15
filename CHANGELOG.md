@@ -71,3 +71,15 @@
 - 采集靠订阅，只能看到插件装载之后发生的事件；装载时已在运行的会话，其早期消息不在记忆里。
 - 原生设置页的导航图标固定为 DSH 外壳的默认图标，第三方 section 无法自定义。
 - 「打开记忆目录」在纯网页环境里没有对应系统调用，实际行为是复制路径到剪贴板。
+
+### 修复
+
+- **无 GUI 的组合里插件不再消失**：`webServer` 从 `inject` 里去掉，改为用 `ctx.get()` 软探测。
+  此前在没有 web 服务的 `dsh headless` 组合里，硬依赖会让整个插件停在 pending——
+  不只是少几条 HTTP 路由，而是采集、工具、注入全部不生效，CLI 只报告
+  `dsh: warning: 1 entry did not activate`。
+- **软探测必须走 `ctx.get()`**：Cordis 的 context 是代理，读取任何未在 `inject` 里声明的属性都会抛
+  `Error: cannot get property "webServer" without inject`，直接 `ctx.webServer` 判空会在无头组合里崩掉 `apply`。
+- **验收脚手架不再掩盖这个错误**：`tools/verify-host.mjs` 的桩上下文原先把 `webServer`
+  暴露成普通属性，与真实代理语义不符，因此测不出上面那个问题；现已改为只经 `get()`
+  暴露可选服务、其余属性一律抛错，并新增 `tools/verify-headless.mjs` 专门回归无头组合。
