@@ -29,9 +29,9 @@ export function resolveDshHome(env: NodeJS.ProcessEnv = process.env, home: strin
 }
 
 /** Directory holding every markdown file this plugin owns. */
-export const MEMORY_DIR_NAME = 'dsh-workbuddy-memory'
+export const MEMORY_DIR_NAME = 'dsh-memorybuddy'
 
-/** The plugin's data root: `$DSH_HOME/dsh-workbuddy-memory`. */
+/** The plugin's data root: `$DSH_HOME/dsh-memorybuddy`. */
 export function resolveMemoryRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveDshHome(env), MEMORY_DIR_NAME)
 }

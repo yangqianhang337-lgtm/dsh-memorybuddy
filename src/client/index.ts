@@ -24,7 +24,7 @@
 
 import { DICTIONARIES, NS } from './locales.ts'
 import { MemoryController, useMemoryView, type MemoryFace } from './service.ts'
-import { registerWorkBuddyPanel } from './panel.tsx'
+import { registerMemoryBuddyPanel } from './panel.tsx'
 import { registerSettingsSections } from './sections.tsx'
 import { installPanelStyles } from './styles.ts'
 import { setActiveLocale, setRuntimeTranslate } from './t.ts'
@@ -46,7 +46,7 @@ interface ClientLike {
 }
 
 /** First application wins: a second factory run in one page must not double-mount. */
-const PAGE_FLAG = '__dshWorkBuddyMemoryMounted'
+const PAGE_FLAG = '__dshMemoryBuddyMounted'
 
 /**
  * Mount the browser half.
@@ -57,7 +57,7 @@ export function apply(ctx: ClientLike): void {
     applyInner(ctx)
   } catch (error) {
     // Never rethrow: the shell treats a throwing plugin apply as a boot failure.
-    console.error('workbuddy-memory: 面板挂载失败，插件已跳过：', error)
+    console.error('memorybuddy: 面板挂载失败，插件已跳过：', error)
   }
 }
 
@@ -71,7 +71,7 @@ function applyInner(ctx: ClientLike): void {
     try {
       ctx.effect?.(callback, label)
     } catch (error) {
-      console.error(`workbuddy-memory: ctx.effect(${label}) 失败：`, error)
+      console.error(`memorybuddy: ctx.effect(${label}) 失败：`, error)
     }
   }
 
@@ -79,7 +79,7 @@ function applyInner(ctx: ClientLike): void {
   // rebuilt bundle would be dropped for the rest of the page's life.
   effect(() => () => {
     page[PAGE_FLAG] = false
-  }, 'workbuddy-memory: mount claim')
+  }, 'memorybuddy: mount claim')
 
   // One stylesheet per module, injected once per page (see styles.ts).
   installPanelStyles()
@@ -120,7 +120,7 @@ function applyInner(ctx: ClientLike): void {
       setRuntimeTranslate(undefined)
       if (typeof off === 'function') (off as () => void)()
     }
-  }, 'workbuddy-memory: dictionaries')
+  }, 'memorybuddy: dictionaries')
 
   // The shared controller: the panel and both settings pages render this one
   // value, so a save made in either drop is already visible in the other.
@@ -128,7 +128,7 @@ function applyInner(ctx: ClientLike): void {
   effect(() => {
     void controller.load()
     return () => controller.dispose()
-  }, 'workbuddy-memory: controller')
+  }, 'memorybuddy: controller')
 
   const face: MemoryFace = {
     useView: () => useMemoryView(controller),
@@ -140,6 +140,6 @@ function applyInner(ctx: ClientLike): void {
     onAction: (action: Record<string, unknown>): Promise<boolean> => controller.act(action),
   }
 
-  registerWorkBuddyPanel(ctx as unknown as { slots: unknown }, face)
+  registerMemoryBuddyPanel(ctx as unknown as { slots: unknown }, face)
   registerSettingsSections(ctx as unknown as { slots: unknown }, face)
 }

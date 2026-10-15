@@ -30,7 +30,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-workbuddy-headless-'))
+const home = mkdtempSync(join(tmpdir(), 'dsh-memorybuddy-headless-'))
 process.env.DSH_HOME = home
 
 let passed = 0
@@ -152,12 +152,12 @@ await new Promise(resolve => setTimeout(resolve, 600))
 
 record(
   'the prompt section is registered anyway',
-  sections.some(section => section.name === 'plugin:workbuddy-memory'),
+  sections.some(section => section.name === 'plugin:memorybuddy'),
   sections.map(section => section.name).join(', ') || '(none)',
 )
 record(
   'the memory tools are registered anyway',
-  ['workbuddy_memory', 'workbuddy_remember', 'workbuddy_forget'].every(name => tools.has(name)),
+  ['memorybuddy_recall', 'memorybuddy_remember', 'memorybuddy_forget'].every(name => tools.has(name)),
   [...tools.keys()].join(', ') || '(none)',
 )
 record(
@@ -236,7 +236,7 @@ function findNote(directory) {
   return ''
 }
 
-const notePath = findNote(join(home, 'dsh-workbuddy-memory', 'sessions'))
+const notePath = findNote(join(home, 'dsh-memorybuddy', 'sessions'))
 let note = ''
 try {
   note = readFileSync(notePath, 'utf8')

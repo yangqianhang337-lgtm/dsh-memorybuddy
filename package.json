@@ -1,7 +1,7 @@
 {
-  "name": "dsh-workbuddy-memory",
-  "version": "0.1.0",
-  "description": "WorkBuddy 个性化与跨会话记忆：把称呼、回复风格、人设、指令与长期记忆存成 markdown，并提供一级侧边栏面板与两个原生设置页。",
+  "name": "dsh-memorybuddy",
+  "version": "0.2.0",
+  "description": "MemoryBuddy 个性化与跨会话记忆：把称呼、回复风格、人设、指令与长期记忆存成 markdown，并提供一级侧边栏面板与两个原生设置页。",
   "keywords": [
     "dsh",
     "dsh-plugin",

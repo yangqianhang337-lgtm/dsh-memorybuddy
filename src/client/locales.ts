@@ -1,5 +1,5 @@
 /**
- * zh / en dictionaries for the WorkBuddy panel and its two settings pages.
+ * zh / en dictionaries for the MemoryBuddy panel and its two settings pages.
  *
  * The panel ships Chinese first (memory-plan §10) with an English fallback, so
  * every user-visible string goes through `t()` rather than being written inline:
@@ -7,7 +7,7 @@
  * break the English half of the release.
  */
 
-export const NS = 'workbuddy-memory'
+export const NS = 'memorybuddy'
 
 export interface Dictionary {
   /** Panel row label in the sidebar shell. */
@@ -140,8 +140,8 @@ export interface Dictionary {
 }
 
 const zh: Dictionary = {
-  'entry.label': 'WorkBuddy',
-  'entry.tip': 'WorkBuddy 个性化与记忆',
+  'entry.label': 'MemoryBuddy',
+  'entry.tip': 'MemoryBuddy 个性化与记忆',
 
   'nav.personalize': '个性化',
   'nav.memory': '记忆与进化',
@@ -149,19 +149,19 @@ const zh: Dictionary = {
 
   'personalize.title': '个性化',
   'personalize.subtitle': '这些设置会立即生效，并写入本机的记忆目录。',
-  'card.userName.title': 'WorkBuddy 对你的称呼',
-  'card.agentName.title': 'WorkBuddy 的名字',
+  'card.userName.title': 'MemoryBuddy 对你的称呼',
+  'card.agentName.title': 'MemoryBuddy 的名字',
   'card.replyStyle.title': '回复风格',
-  'card.replyStyle.desc': '选择 WorkBuddy 回复的默认语气。',
+  'card.replyStyle.desc': '选择 MemoryBuddy 回复的默认语气。',
   'card.welcome.title': '欢迎语',
   'card.welcome.desc': '当对话加载较慢时，用一句问候陪你等待。',
   'card.showFileChanges.title': '显示文件修改过程',
-  'card.showFileChanges.desc': '开启后，WorkBuddy 会逐步展示每次文件改动的过程与结果。',
-  'card.instructions.title': '给 WorkBuddy 的指令',
-  'card.instructions.desc': '写下你希望 WorkBuddy 一直遵守的要求，之后每次对话和任务都会默认生效。',
+  'card.showFileChanges.desc': '开启后，MemoryBuddy 会逐步展示每次文件改动的过程与结果。',
+  'card.instructions.title': '给 MemoryBuddy 的指令',
+  'card.instructions.desc': '写下你希望 MemoryBuddy 一直遵守的要求，之后每次对话和任务都会默认生效。',
   'card.instructions.placeholder': '例如：回答尽量简洁，先给结论',
   'card.persona.title': '人设设定',
-  'card.persona.desc': '设定 WorkBuddy 的身份、性格与表达风格，对所有回复生效。',
+  'card.persona.desc': '设定 MemoryBuddy 的身份、性格与表达风格，对所有回复生效。',
   'card.longTerm.title': '长期记忆',
   'card.longTerm.desc': '跨会话保存的重要信息与结论，可随时查看和修改。',
 
@@ -181,11 +181,11 @@ const zh: Dictionary = {
   'memory.modelStage': '模型提炼未启用（首版）',
   'memory.entriesHint': '只在服务端记下条目；内容始终以 markdown 文件为准。',
   'memory.footerLead': '记忆内容遵循 ',
-  'memory.privacyPolicy': 'WorkBuddy 隐私政策',
+  'memory.privacyPolicy': 'MemoryBuddy 隐私政策',
   'memory.footerTail': '，仅你本人可见',
   'memory.hits': '命中 {count} 条记忆',
   'memory.noHits': '没有命中「{query}」',
-  'memory.footer': '记忆内容遵循 WorkBuddy 隐私政策，仅你本人可见',
+  'memory.footer': '记忆内容遵循 MemoryBuddy 隐私政策，仅你本人可见',
   'memory.entries': '已记住的条目',
   'memory.entriesEmpty': '还没有积累到条目。多聊几轮后会自动出现。',
   'memory.sessions': '最近的会话沉淀',
@@ -255,13 +255,13 @@ const zh: Dictionary = {
   'draft.source': '来自会话',
 
   'doc.persona': '人设设定',
-  'doc.instructions': '给 WorkBuddy 的指令',
+  'doc.instructions': '给 MemoryBuddy 的指令',
   'doc.index': '长期记忆',
 }
 
 const en: Dictionary = {
-  'entry.label': 'WorkBuddy',
-  'entry.tip': 'WorkBuddy personalization and memory',
+  'entry.label': 'MemoryBuddy',
+  'entry.tip': 'MemoryBuddy personalization and memory',
 
   'nav.personalize': 'Personalization',
   'nav.memory': 'Memory & evolution',
@@ -269,19 +269,19 @@ const en: Dictionary = {
 
   'personalize.title': 'Personalization',
   'personalize.subtitle': 'These settings apply immediately and are written to your local memory folder.',
-  'card.userName.title': 'What WorkBuddy calls you',
-  'card.agentName.title': "WorkBuddy's name",
+  'card.userName.title': 'What MemoryBuddy calls you',
+  'card.agentName.title': "MemoryBuddy's name",
   'card.replyStyle.title': 'Reply style',
-  'card.replyStyle.desc': 'Choose the default tone of WorkBuddy replies.',
+  'card.replyStyle.desc': 'Choose the default tone of MemoryBuddy replies.',
   'card.welcome.title': 'Welcome message',
   'card.welcome.desc': 'While a conversation is loading, a greeting keeps you company.',
   'card.showFileChanges.title': 'Show file changes',
-  'card.showFileChanges.desc': 'When on, WorkBuddy walks through each file change and its result.',
-  'card.instructions.title': 'Instructions for WorkBuddy',
-  'card.instructions.desc': 'Write the rules WorkBuddy should always follow; they apply to every conversation and task by default.',
+  'card.showFileChanges.desc': 'When on, MemoryBuddy walks through each file change and its result.',
+  'card.instructions.title': 'Instructions for MemoryBuddy',
+  'card.instructions.desc': 'Write the rules MemoryBuddy should always follow; they apply to every conversation and task by default.',
   'card.instructions.placeholder': 'For example: keep answers short, lead with the conclusion',
   'card.persona.title': 'Persona',
-  'card.persona.desc': "Sets WorkBuddy's identity, character and voice; it affects every reply.",
+  'card.persona.desc': "Sets MemoryBuddy's identity, character and voice; it affects every reply.",
   'card.longTerm.title': 'Long-term memory',
   'card.longTerm.desc': 'Important facts and conclusions kept across conversations; view or edit any time.',
 
@@ -301,11 +301,11 @@ const en: Dictionary = {
   'memory.modelStage': 'Model distillation is off (first release)',
   'memory.entriesHint': 'Entries are recorded on the server side; the markdown files stay the source of truth.',
   'memory.footerLead': 'Memory follows the ',
-  'memory.privacyPolicy': 'WorkBuddy privacy policy',
+  'memory.privacyPolicy': 'MemoryBuddy privacy policy',
   'memory.footerTail': ' and is visible only to you',
   'memory.hits': '{count} memories matched',
   'memory.noHits': 'Nothing matched "{query}"',
-  'memory.footer': 'Memory follows the WorkBuddy privacy policy and is visible only to you',
+  'memory.footer': 'Memory follows the MemoryBuddy privacy policy and is visible only to you',
   'memory.entries': 'Remembered entries',
   'memory.entriesEmpty': 'Nothing accumulated yet. Entries show up after a few conversations.',
   'memory.sessions': 'Recent session notes',
@@ -375,7 +375,7 @@ const en: Dictionary = {
   'draft.source': 'From sessions',
 
   'doc.persona': 'Persona',
-  'doc.instructions': 'Instructions for WorkBuddy',
+  'doc.instructions': 'Instructions for MemoryBuddy',
   'doc.index': 'Long-term memory',
 }
 

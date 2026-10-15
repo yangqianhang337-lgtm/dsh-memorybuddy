@@ -32,8 +32,8 @@ check(
 
 check(
   'package id',
-  source.includes('id: "dsh-workbuddy-memory"'),
-  'id: "dsh-workbuddy-memory"',
+  source.includes('id: "dsh-memorybuddy"'),
+  'id: "dsh-memorybuddy"',
 )
 
 check(
@@ -77,7 +77,7 @@ check(
 // expected; the IIFE escape hatch that must NOT appear is a globalName carrier.
 check(
   'no IIFE global escape',
-  !source.includes('globalThis.__dshWorkBuddyMemory'),
+  !source.includes('globalThis.__dshMemoryBuddy'),
   'no globalName artifact',
 )
 
@@ -85,13 +85,13 @@ check(
 // registered an empty factory would mount nothing at all.
 check(
   'panel id baked in',
-  source.includes('"workbuddy"') || source.includes("'workbuddy'"),
+  source.includes('"memorybuddy"') || source.includes("'memorybuddy'"),
   'PANEL_ID literal present',
 )
 
 check(
   'settings section ids baked in',
-  source.includes('workbuddy-personalize') && source.includes('workbuddy-memory"'),
+  source.includes('memorybuddy-personalize') && source.includes('memorybuddy-memory"'),
   'both settings.section ids present',
 )
 

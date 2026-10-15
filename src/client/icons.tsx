@@ -15,13 +15,13 @@
 import * as React from 'react'
 
 /** Panel id; also the key the layout's `main` slot is registered under. */
-export const PANEL_ID = 'workbuddy'
+export const PANEL_ID = 'memorybuddy'
 
 /**
  * The sidebar row glyph: a memory card with a sparkle, drawn on the same 16px
  * artboard and 1.3px stroke as the shell's own icons so the rail stays even.
  */
-export function WorkBuddyPanelIcon({ size }: { size: number; active: boolean }): React.ReactElement {
+export function MemoryBuddyPanelIcon({ size }: { size: number; active: boolean }): React.ReactElement {
   return (
     <svg
       data-dsh-panel-entry={PANEL_ID}

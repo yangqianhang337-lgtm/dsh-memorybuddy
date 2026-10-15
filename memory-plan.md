@@ -1,5 +1,7 @@
 # WorkBuddy 个性化 + 记忆与进化 · DSH 插件实施方案（memory-plan.md）
 
+> 注：本项目已于 2026-10-16 正式命名为 **memorybuddy**，代码内标识相应改为 `memorybuddy`（详见 update-plan.md 与 CHANGELOG 0.2.0）；本文是当时的历史方案，保留原文不改。
+
 > 状态：**第 2 稿 · 待你过目确认**（确认前不写任何插件代码）
 > 目标运行环境：本机 DSH Desktop（`D:\DSH-Desktop`，profile `desktop`，GUI http://127.0.0.1:19387 ）
 > 插件源码目录：`D:\dsh-workbuddy-memory`

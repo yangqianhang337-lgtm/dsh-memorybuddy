@@ -1,8 +1,8 @@
 /**
- * Host half of `dsh-workbuddy-memory`.
+ * Host half of `dsh-memorybuddy`.
  *
  * The host owns everything durable:
- *   - the markdown store under `$DSH_HOME/dsh-workbuddy-memory/`,
+ *   - the markdown store under `$DSH_HOME/dsh-memorybuddy/`,
  *   - the four HTTP routes the panel talks to,
  *   - the system-prompt section that injects long-term memory,
  *   - the `session/event` collector that turns live sessions into notes,
@@ -39,7 +39,7 @@ import { memoryRoutes } from './host/routes.ts'
 import { MemoryStore, redact } from './host/store.ts'
 
 /** The package name, used as the mount guard's seat and the log prefix. */
-const PACKAGE_NAME = 'dsh-workbuddy-memory'
+const PACKAGE_NAME = 'dsh-memorybuddy'
 
 /**
  * Services the host half cannot work without.
@@ -71,15 +71,15 @@ const PACKAGE_NAME = 'dsh-workbuddy-memory'
 export const inject = ['systemPrompt', 'agents', 'commands']
 
 /** The three tool names of memory-plan §5.5, in registration order. */
-export const MEMORY_TOOL_NAMES = ['workbuddy_memory', 'workbuddy_remember', 'workbuddy_forget'] as const
+export const MEMORY_TOOL_NAMES = ['memorybuddy_recall', 'memorybuddy_remember', 'memorybuddy_forget'] as const
 
 /** What the model is told about the plugin, appended under the memory text. */
 export const MEMORY_TOOL_GUIDANCE = [
-  '本机已安装 dsh-workbuddy-memory 插件：它把跨会话的长期记忆保存在 $DSH_HOME/dsh-workbuddy-memory/ 的 markdown 文件里，',
+  '本机已安装 dsh-memorybuddy 插件：它把跨会话的长期记忆保存在 $DSH_HOME/dsh-memorybuddy/ 的 markdown 文件里，',
   '并在每轮对话里把用户偏好、人设、指令与记忆索引注入到这里。',
-  '需要回忆用户偏好、环境事实或项目约定时调用 workbuddy_memory；',
-  '用户明确要求「记住」某件事时调用 workbuddy_remember；',
-  '记忆有误或已过期时调用 workbuddy_forget。',
+  '需要回忆用户偏好、环境事实或项目约定时调用 memorybuddy_recall；',
+  '用户明确要求「记住」某件事时调用 memorybuddy_remember；',
+  '记忆有误或已过期时调用 memorybuddy_forget。',
   '工具没返回的内容不要当作已知事实。',
 ].join('')
 
@@ -255,7 +255,7 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
    * -------------------------------------------------------------- */
 
   const memoryTool = (): ToolDefinition => ({
-    name: 'workbuddy_memory',
+    name: 'memorybuddy_recall',
     description:
       '检索跨会话长期记忆。不传参数时返回记忆索引与各主题的条目数；传 query 时按关键词检索条目（含低置信候选）。',
     parameters: {
@@ -304,7 +304,7 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
   })
 
   const rememberTool = (): ToolDefinition => ({
-    name: 'workbuddy_remember',
+    name: 'memorybuddy_remember',
     description:
       '主动记下一条跨会话事实。仅用于用户明确要求记住的内容、稳定环境事实、项目约定与硬约束；密钥等敏感内容会被拒绝。',
     parameters: {
@@ -372,7 +372,7 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
   })
 
   const forgetTool = (): ToolDefinition => ({
-    name: 'workbuddy_forget',
+    name: 'memorybuddy_forget',
     description: '软删除一条记忆：条目移入 archive/ 目录，可以人工恢复，不会物理删除。',
     parameters: {
       type: 'object',

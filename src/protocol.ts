@@ -1,13 +1,13 @@
 /**
  * Shared contract between the host half and the browser half.
  *
- * The host owns every file under `$DSH_HOME/dsh-workbuddy-memory/`; the browser
+ * The host owns every file under `$DSH_HOME/dsh-memorybuddy/`; the browser
  * is a same-origin asynchronous view over that store. Both halves import this
  * module so a route rename cannot drift between them.
  */
 
 /** Root-absolute route prefix the host registers. */
-export const API_PREFIX = '/api/workbuddy-memory'
+export const API_PREFIX = '/api/memorybuddy'
 
 /** Reply style choices, in the order the panel offers them. */
 export const REPLY_STYLES = ['默认', '简洁', '详细', '教学', '直接'] as const

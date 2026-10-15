@@ -1,5 +1,5 @@
 /**
- * The memory store: every file under `$DSH_HOME/dsh-workbuddy-memory/`.
+ * The memory store: every file under `$DSH_HOME/dsh-memorybuddy/`.
  *
  * This is the only module that touches the data root. It owns the layout
  * (memory-plan §3.2), the templates (§4), the optimistic-concurrency revision

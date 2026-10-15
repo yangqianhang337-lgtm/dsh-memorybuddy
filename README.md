@@ -1,18 +1,18 @@
-# dsh-workbuddy-memory
+# dsh-memorybuddy
 
-把 WorkBuddy 的**个性化设置**与**跨会话长期记忆**存成你自己能看、能改、能带走的 markdown 文件，
+把 MemoryBuddy 的**个性化设置**与**跨会话长期记忆**存成你自己能看、能改、能带走的 markdown 文件，
 并在 DeepSeek Harness 里提供**一个一级侧边栏面板**和**两个原生设置页**。
 
-- 数据全部落在 `$DSH_HOME/dsh-workbuddy-memory/`，就是普通 markdown，随时手改。
+- 数据全部落在 `$DSH_HOME/dsh-memorybuddy/`，就是普通 markdown，随时手改。
 - 插件本身不写入你的项目仓库，也不写入 `AGENTS.md`。
 - 删除插件不会删除你的记忆；怎么彻底清理由你决定（见「卸载与数据清理」）。
 
 > **English abstract** — A dual-sided DeepSeek Harness plugin that stores personalization
 > (`profile.md`, `instructions.md`, `preferences.md`) and cross-session memory
 > (`memory/*.md`, `sessions/<date>/*.md`) as plain hand-editable Markdown under
-> `$DSH_HOME/dsh-workbuddy-memory/`. It ships one first-level sidebar panel and two native
+> `$DSH_HOME/dsh-memorybuddy/`. It ships one first-level sidebar panel and two native
 > settings pages, injects a compact memory section into every turn's system prompt, and
-> exposes three agent tools (`workbuddy_memory`, `workbuddy_remember`, `workbuddy_forget`)
+> exposes three agent tools (`memorybuddy_recall`, `memorybuddy_remember`, `memorybuddy_forget`)
 > plus a `/memory` command. First release (0.1.0) covers the skeleton, the storage layer,
 > the panel UI, and session collection; memory distillation by a model is **not** enabled yet.
 
@@ -22,7 +22,7 @@
 
 ### 一级侧边栏面板
 
-装好后侧边栏多出一行 WorkBuddy 图标（排在「插件」「定时」之后），点开是一个两栏面板：
+装好后侧边栏多出一行 MemoryBuddy 图标（排在「插件」「定时」之后），点开是一个两栏面板：
 
 ```
 ┌──────────────┬──────────────────────────────────────────┐
@@ -31,7 +31,7 @@
 │ 个性化        │  │ 称呼 / 名字                         │  │
 │ 记忆与进化 ●  │  │ 回复风格 / 欢迎语 / 显示文件修改过程   │  │
 │              │  ├────────────────────────────────────┤  │
-│              │  │ 给 WorkBuddy 的指令     [编辑]       │  │
+│              │  │ 给 MemoryBuddy 的指令     [编辑]       │  │
 │              │  ├────────────────────────────────────┤  │
 │              │  │ 人设设定                [编辑]       │  │
 │              │  ├────────────────────────────────────┤  │
@@ -59,7 +59,7 @@
 | 回复风格 | `preferences.md` | 默认 / 简洁 / 详细 / 教学 / 直接 |
 | 欢迎语 | `preferences.md` | 关闭后不再有开场白 |
 | 显示文件修改过程 | `preferences.md` | 是否展示改动细节 |
-| 给 WorkBuddy 的指令 | `instructions.md` | 只写要求，例：`回答尽量简洁，先给结论` |
+| 给 MemoryBuddy 的指令 | `instructions.md` | 只写要求，例：`回答尽量简洁，先给结论` |
 | 人设设定 | `profile.md` | 身份、性格、表达风格，对所有回复生效 |
 | 长期记忆 | `memory/index.md` | 跨会话沉淀的结论，可编辑也可只看预览 |
 
@@ -75,9 +75,9 @@
 
 | 名称 | 作用 |
 |---|---|
-| `workbuddy_memory` | 检索长期记忆；不传 `query` 时返回记忆索引与各主题条数 |
-| `workbuddy_remember` | 主动记下一条事实（先跑脱敏检查，命中密钥就拒绝写入） |
-| `workbuddy_forget` | 软删除一条记忆（移入 `archive/`，可人工恢复） |
+| `memorybuddy_recall`  | 检索长期记忆；不传 `query` 时返回记忆索引与各主题条数 |
+| `memorybuddy_remember` | 主动记下一条事实（先跑脱敏检查，命中密钥就拒绝写入） |
+| `memorybuddy_forget`  | 软删除一条记忆（移入 `archive/`，可人工恢复） |
 | `/memory` | `状态` 看当前记忆概况；`整理` 立即执行一次确定性整理 |
 
 ---
@@ -88,14 +88,14 @@
 
 ```bash
 # 从已克隆的目录安装（link: 方式，改代码即时生效）
-dsh plugin --profile <profile名> add link:/绝对路径/dsh-workbuddy-memory
+dsh plugin --profile <profile名> add link:/绝对路径/dsh-memorybuddy
 ```
 
 > **注意**：DSH Desktop 的 `desktop` profile 被 Electron 应用独占管理，
 > 命令行会拒绝 `--profile desktop`（报 `profile "desktop" is managed exclusively by the Electron application`）。
 > 这种情况下请用应用内的**插件管理**界面安装，或把插件装到其它 profile。
 
-安装后重启应用或重载窗口，侧边栏就会出现 WorkBuddy 图标。
+安装后重启应用或重载窗口，侧边栏就会出现 MemoryBuddy 图标。
 
 ### 从源码构建
 
@@ -112,7 +112,7 @@ npm run watch        # 改代码即时重建
 
 ## 数据布局
 
-全部在 `$DSH_HOME/dsh-workbuddy-memory/`（Windows 默认 `C:\Users\<你>\.dsh\dsh-workbuddy-memory\`）：
+全部在 `$DSH_HOME/dsh-memorybuddy/`（Windows 默认 `C:\Users\<你>\.dsh\dsh-memorybuddy\`）：
 
 ```
 preferences.md            称呼 / 名字 / 回复风格 / 开关 / 整理策略
@@ -189,13 +189,13 @@ state.json                采集水位线、待整理队列、冷却表
 
 ## 隐私说明
 
-- **数据不出本机**：记忆只写到 `$DSH_HOME/dsh-workbuddy-memory/`，插件没有任何上报通道。
+- **数据不出本机**：记忆只写到 `$DSH_HOME/dsh-memorybuddy/`，插件没有任何上报通道。
 - **会话笔记只记工具名与成败，绝不记工具正文**——避免正文体积爆炸，也避免把命令输出里的密钥写进记忆。
 - **写入前脱敏**：匹配以下六类模式的内容会被替换成 `［已隐去］` 并拒绝落盘——
   OpenAI 风格 `sk-…` 密钥、GitHub `gh[pousr]_…` 令牌、AWS `AKIA…`、`Bearer …` 令牌、
   `-----BEGIN … PRIVATE KEY-----` 私钥块、`password|secret|token|api_key = …` 赋值式口令。
 - **只采集你真说过的话**：`user/message` 里来自运行时上下文、其它插件、子 agent 的消息都不会进记忆。
-- **HTTP 路由只对本机开放**：`/api/workbuddy-memory/*` 要求同源标记，并同时校验回环地址或 DSH 外壳注入的会话 cookie；
+- **HTTP 路由只对本机开放**：`/api/memorybuddy/*` 要求同源标记，并同时校验回环地址或 DSH 外壳注入的会话 cookie；
   这是一个绊线（tripwire）而非身份认证——它挡住的是从页面脚本或其它进程发起的越权调用。
 - **首版不做模型提炼**：面板会如实显示「模型提炼未启用（首版）」。整理只做确定性工作（扫描、去重、重建索引），
   不会把你的记忆内容发给任何模型。
@@ -205,20 +205,20 @@ state.json                采集水位线、待整理队列、冷却表
 ## 卸载与数据清理
 
 ```bash
-dsh plugin --profile <profile名> remove dsh-workbuddy-memory
+dsh plugin --profile <profile名> remove dsh-memorybuddy
 ```
 
 或在应用内的插件管理界面里禁用/移除。
 
-**卸载不会删除你的记忆**——`$DSH_HOME/dsh-workbuddy-memory/` 会原样保留，重新装上就能接着用。
+**卸载不会删除你的记忆**——`$DSH_HOME/dsh-memorybuddy/` 会原样保留，重新装上就能接着用。
 想彻底清除：
 
 ```powershell
 # 先自己备份一份（可选）
-Copy-Item "$env:DSH_HOME\dsh-workbuddy-memory" "$env:USERPROFILE\Desktop\workbuddy-memory-backup" -Recurse
+Copy-Item "$env:DSH_HOME\dsh-memorybuddy" "$env:USERPROFILE\Desktop\memorybuddy-backup" -Recurse
 
 # 再删除
-Remove-Item "$env:DSH_HOME\dsh-workbuddy-memory" -Recurse -Force
+Remove-Item "$env:DSH_HOME\dsh-memorybuddy" -Recurse -Force
 ```
 
 如果这个插件把技能草案批准成了真实技能，那份文件在 `$DSH_HOME/skills/<name>/SKILL.md`，需要单独删除。

@@ -66,7 +66,7 @@ for (const line of lines) {
 console.log(`decoded ${lines.length} lines → ${events.length} events`)
 
 /* ── bundle the collector against a throwaway DSH_HOME ────────────────── */
-const home = mkdtempSync(join(tmpdir(), 'dsh-workbuddy-replay-'))
+const home = mkdtempSync(join(tmpdir(), 'dsh-memorybuddy-replay-'))
 process.env.DSH_HOME = home
 
 const outfile = join(ROOT, '.tmp-replay-bundle.mjs')
@@ -97,7 +97,7 @@ await collector.flush(target)
 await new Promise(resolve => setTimeout(resolve, 300))
 
 /* ── read the note back ───────────────────────────────────────────────── */
-const root = join(home, 'dsh-workbuddy-memory')
+const root = join(home, 'dsh-memorybuddy')
 const sessionRoot = join(root, 'sessions')
 const days = existsSync(sessionRoot) ? readdirSync(sessionRoot, { withFileTypes: true }).filter(e => e.isDirectory()) : []
 const notePath = days.length === 0 ? undefined : join(sessionRoot, days[0].name, `${target.id}.md`)

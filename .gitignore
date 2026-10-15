@@ -17,9 +17,9 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
-# 本地记忆数据绝不在仓库内（数据在 $DSH_HOME/dsh-workbuddy-memory/）。
+# 本地记忆数据绝不在仓库内（数据在 $DSH_HOME/dsh-memorybuddy/）。
 # 若你把 DSH_HOME 指到了本仓库目录，下面这行可以兜底。
-dsh-workbuddy-memory/
+dsh-memorybuddy/
 
 # 注意：lib/ 是刻意提交的构建产物。
 # 目的：让 `git clone` 后无需安装任何 devDependency 即可直接装载运行，

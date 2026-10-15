@@ -1,5 +1,5 @@
 /**
- * Build the two halves of dsh-workbuddy-memory.
+ * Build the two halves of dsh-memorybuddy.
  *
  * Two bundles come out of one run, because the plugin is served the same way on
  * both sides of the process boundary and each side has a different module
@@ -33,7 +33,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
-const PACKAGE_NAME = 'dsh-workbuddy-memory'
+const PACKAGE_NAME = 'dsh-memorybuddy'
 
 /** Node half: bundle everything, keep Node's own modules external. */
 const HOST_OPTIONS = {
@@ -105,7 +105,7 @@ ${body}
  * module the page cannot register.
  */
 const CLIENT_WRAPPER_PLUGIN = {
-  name: 'workbuddy-memory:loader-registration',
+  name: 'memorybuddy:loader-registration',
   setup(build) {
     build.onEnd(async (result) => {
       if (result.errors.length > 0) return

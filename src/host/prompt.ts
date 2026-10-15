@@ -22,11 +22,11 @@ import { INDEX_PLACEHOLDER, INDEX_SECTIONS } from './templates.ts'
 import type { MemoryStore } from './store.ts'
 
 /** The name of the section, as it appears in the prompt ledger. */
-export const SECTION_NAME = 'plugin:workbuddy-memory'
+export const SECTION_NAME = 'plugin:memorybuddy'
 /** Between the persona (0) and PLAN_POLICY (500). */
 export const SECTION_ORDER = 120
 /** The line appended when the index had to be truncated. */
-const TOOL_HINT = '（更多记忆见 workbuddy_memory 工具）'
+const TOOL_HINT = '（更多记忆见 memorybuddy_recall 工具）'
 
 /** The rendered text of one turn. */
 export interface RenderedMemory {

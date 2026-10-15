@@ -26,7 +26,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 /* --- a throwaway DSH_HOME -------------------------------------------------- */
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-workbuddy-test-'))
+const home = mkdtempSync(join(tmpdir(), 'dsh-memorybuddy-test-'))
 process.env.DSH_HOME = home
 
 const results = []
@@ -49,7 +49,7 @@ async function settle(rounds = 8) {
 /** Read a file under the memory root, or undefined. */
 function memoryFile(relative) {
   try {
-    return readFileSync(join(home, 'dsh-workbuddy-memory', relative), 'utf8')
+    return readFileSync(join(home, 'dsh-memorybuddy', relative), 'utf8')
   } catch {
     return undefined
   }
@@ -213,7 +213,7 @@ async function call(method, path, body) {
 // call is what proves the tree exists; give that task a turn to settle.
 await new Promise(resolve => setTimeout(resolve, 250))
 
-const state0 = await call('GET', '/api/workbuddy-memory/state', undefined)
+const state0 = await call('GET', '/api/memorybuddy/state', undefined)
 record(
   'GET /state answers 200',
   state0.status === 200 && state0.body?.ok === true,
@@ -237,7 +237,7 @@ record(
 )
 record(
   'snapshot reports the memory root',
-  typeof state0.body?.root === 'string' && state0.body.root.endsWith('dsh-workbuddy-memory'),
+  typeof state0.body?.root === 'string' && state0.body.root.endsWith('dsh-memorybuddy'),
   state0.body?.root,
 )
 record(
@@ -260,12 +260,12 @@ const profile = state0.body.documents['profile.md']
 // A hand edit is the whole point of shipping markdown: write the file behind the
 // plugin's back, exactly as a user would in an editor.
 writeFileSync(
-  join(home, 'dsh-workbuddy-memory/profile.md'),
+  join(home, 'dsh-memorybuddy/profile.md'),
   profile.text.replace('你是 DSH同学，我最好的助手。', '你是 测试同学，一个手写的人设。'),
   'utf8',
 )
 
-const state1 = await call('GET', '/api/workbuddy-memory/state', undefined)
+const state1 = await call('GET', '/api/memorybuddy/state', undefined)
 record(
   'hand edit is read back with a new revision',
   state1.body?.documents?.['profile.md']?.text.includes('手写的人设') === true &&
@@ -273,7 +273,7 @@ record(
   `revision ${profile.revision.slice(0, 8)} -> ${String(state1.body?.documents?.['profile.md']?.revision).slice(0, 8)}`,
 )
 
-const stale = await call('POST', '/api/workbuddy-memory/save', {
+const stale = await call('POST', '/api/memorybuddy/save', {
   path: 'profile.md',
   text: 'STALE WRITE MUST NOT LAND',
   revision: profile.revision,
@@ -295,7 +295,7 @@ record(
 )
 
 const current = state1.body.documents['profile.md'].revision
-const fresh = await call('POST', '/api/workbuddy-memory/save', {
+const fresh = await call('POST', '/api/memorybuddy/save', {
   path: 'profile.md',
   text: '你是 并发同学。',
   revision: current,
@@ -306,8 +306,8 @@ record('a current revision saves', fresh.status === 200 && fresh.body?.ok === tr
 // must be told rather than silently dropped.
 const rev = state1.body.documents['instructions.md'].revision
 const [raceA, raceB] = await Promise.all([
-  call('POST', '/api/workbuddy-memory/save', { path: 'instructions.md', text: '写入 A', revision: rev }),
-  call('POST', '/api/workbuddy-memory/save', { path: 'instructions.md', text: '写入 B', revision: rev }),
+  call('POST', '/api/memorybuddy/save', { path: 'instructions.md', text: '写入 A', revision: rev }),
+  call('POST', '/api/memorybuddy/save', { path: 'instructions.md', text: '写入 B', revision: rev }),
 ])
 const winners = [raceA, raceB].filter(item => item.status === 200).length
 const losers = [raceA, raceB].filter(item => item.status === 409).length
@@ -324,7 +324,7 @@ record(
 
 /* --- preferences ----------------------------------------------------------- */
 
-const patched = await call('POST', '/api/workbuddy-memory/preferences', {
+const patched = await call('POST', '/api/memorybuddy/preferences', {
   patch: { userName: '测试者', replyStyle: '简洁' },
 })
 record(
@@ -402,7 +402,7 @@ listeners.get('session/flush')?.(target)
 await settle()
 
 const { readdirSync, existsSync } = await import('node:fs')
-const sessionsRoot = join(home, 'dsh-workbuddy-memory/sessions')
+const sessionsRoot = join(home, 'dsh-memorybuddy/sessions')
 const dayDirs = (existsSync(sessionsRoot) ? readdirSync(sessionsRoot, { withFileTypes: true }) : [])
   .filter(entry => entry.isDirectory())
   .map(entry => entry.name)
@@ -459,7 +459,7 @@ record(
 
 /* --- toggle off really stops collection ----------------------------------- */
 
-const off = await call('POST', '/api/workbuddy-memory/preferences', { patch: { conversationMemory: false } })
+const off = await call('POST', '/api/memorybuddy/preferences', { patch: { conversationMemory: false } })
 record(
   '对话记忆 can be switched off',
   off.body?.snapshot?.preferences?.conversationMemory === false,
@@ -475,12 +475,12 @@ listeners.get('session/event')?.(target2, event('user/message', 1, userMessage('
 listeners.get('session/flush')?.(target2)
 await settle(4)
 
-const leaked = existsSync(join(home, `dsh-workbuddy-memory/sessions/${dayDirs[0] ?? ''}/sess-test-2.md`))
+const leaked = existsSync(join(home, `dsh-memorybuddy/sessions/${dayDirs[0] ?? ''}/sess-test-2.md`))
 record('the switch off stops collection', leaked === false, leaked ? 'sess-test-2.md EXISTS' : 'no file written')
 
 /* --- consolidation --------------------------------------------------------- */
 
-const consolidated = await call('POST', '/api/workbuddy-memory/action', { action: { kind: 'consolidate' } })
+const consolidated = await call('POST', '/api/memorybuddy/action', { action: { kind: 'consolidate' } })
 record(
   'manual consolidation runs',
   consolidated.status === 200 && consolidated.body?.result?.report !== undefined,
@@ -497,7 +497,7 @@ record(
 const failed = results.filter(item => !item.ok)
 for (const item of results) console.log(`${item.ok ? 'ok  ' : 'FAIL'}  ${item.label}: ${item.detail}`)
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`)
-console.log(`memory root: ${join(home, 'dsh-workbuddy-memory')}`)
+console.log(`memory root: ${join(home, 'dsh-memorybuddy')}`)
 
 if (process.env.KEEP_TEST_HOME !== '1') rmSync(home, { recursive: true, force: true })
 if (failed.length > 0) process.exitCode = 1

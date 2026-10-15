@@ -2,7 +2,7 @@
  * The HTTP surface: one prefix, five routes, and the same auth fence the
  * task-board plugin uses.
  *
- * The prefix is root-absolute (`/api/workbuddy-memory`) because the route table
+ * The prefix is root-absolute (`/api/memorybuddy`) because the route table
  * matches on the request URL; the browser half builds its URLs from
  * `API_PREFIX.slice(1)` against the document base, because the GUI page is
  * served under `<base href="./">` and an absolute path there would resolve
@@ -159,7 +159,7 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
           host.onChanged()
           writeJson(response, 200, { ok: true, result, snapshot: await host.store.snapshot() })
         } catch (error) {
-          host.log(`workbuddy-memory: 动作失败：${String(error)}`)
+          host.log(`memorybuddy: 动作失败：${String(error)}`)
           writeJson(response, 500, { ok: false, error: String(error) })
         }
       },

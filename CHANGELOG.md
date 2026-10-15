@@ -2,6 +2,58 @@
 
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+> 说明：0.1.0 一节保留发布当时的原文（那时本项目尚未正式命名），其中出现的旧名与旧工具名
+> 是当时的事实记录，不再改写；改名本身记录在 0.2.0 一节。
+
+## [0.2.0] - 2026-10-16
+
+**重命名发布**：项目正式定名 **memorybuddy**，插件内所有属于本项目自身的 `workbuddy` 标识
+改为 `memorybuddy`，以便与用户电脑上已有的 workbuddy 系列（`dsh-workbuddy-xdpool` 插件、
+`.workbuddy-*.json` 模型目录）区分开。**别人的 workbuddy 一律未动。**
+
+### 变更（破坏性）
+
+| 项目 | 0.1.0 | 0.2.0 |
+|---|---|---|
+| 包名 | `dsh-workbuddy-memory` | `dsh-memorybuddy` |
+| 数据目录 | `$DSH_HOME/dsh-workbuddy-memory/` | `$DSH_HOME/dsh-memorybuddy/` |
+| bundle 条目 id | `workbuddy-memory` | `memorybuddy` |
+| HTTP 前缀 | `/api/workbuddy-memory` | `/api/memorybuddy` |
+| 提示词 section | `plugin:workbuddy-memory` | `plugin:memorybuddy` |
+| 工具名 | `workbuddy_memory` / `workbuddy_remember` / `workbuddy_forget` | `memorybuddy_recall` / `memorybuddy_remember` / `memorybuddy_forget` |
+| 面板 id / DOM 锚点 | `workbuddy` / `data-dsh-workbuddy-view` | `memorybuddy` / `data-dsh-memorybuddy-view` |
+| 两个设置页 id | `workbuddy-personalize` / `workbuddy-memory` | `memorybuddy-personalize` / `memorybuddy-memory` |
+| CSS 类前缀 | `wb*` | `mb*` |
+| 界面文案（zh/en） | `WorkBuddy` | `MemoryBuddy` |
+
+- 工具 `workbuddy_memory` 改名为 `memorybuddy_recall`（不叫 `memorybuddy_memory`，避免叠词）。
+- **不提供旧名别名**：0.1.0 未公开发布，无人依赖旧名；别名会把旧名永久留在代码里。
+- 界面文案随之改动，因此与参考截图相比文字有出入（布局、间距、字号不变）——这是有意为之。
+
+### 迁移（从 0.1.0 升级）
+
+数据目录名变了，**升级前请先关闭 DSH Desktop**（否则旧插件会继续写旧目录、并在迁移后又把它重建出来）：
+
+```powershell
+# 1) 备份（可选，但强烈建议）
+Copy-Item "$env:DSH_HOME\dsh-workbuddy-memory" "$env:DSH_HOME\dsh-workbuddy-memory.bak" -Recurse
+
+# 2) 应用已关闭的前提下，改目录名
+Move-Item "$env:DSH_HOME\dsh-workbuddy-memory" "$env:DSH_HOME\dsh-memorybuddy"
+```
+
+目录内**没有任何文件需要改内容**：`state.json` 用的是相对路径，`preferences.md` / `profile.md` /
+`instructions.md` / `memory/*.md` 只存记忆内容本身。只有会话笔记里的 `workspace:` 字段提到仓库路径，
+那是**工作目录**、不是数据目录名，与本次改名无关。
+
+然后卸载旧包、装入新包（应用内插件管理界面，或 `dsh plugin --profile <名> remove dsh-workbuddy-memory`
+后 `add link:<仓库路径>`），重启应用。旧记忆内容会原样出现在面板里。
+
+### 修复
+
+- 本次升级会一并加载 0.1.0 后期修好的宿主半边——此前一直未生效的三处采集缺陷
+  （助手回复被丢弃、工具名退化成字面量 `tool`、晚装载的会话看不到历史）在重启后生效。
+
 ## [0.1.0] - 2026-10-15
 
 首个发布。覆盖规划中的 **P0–P3**。
@@ -22,7 +74,7 @@
 
 **P1 存储层**
 
-- 数据根目录解析自 `DSH_HOME`，回退 `~/.dsh`，再拼 `dsh-workbuddy-memory/`；代码里不含任何硬编码用户路径。
+- 数据根目录解析自 `DSH_HOME`，回退 `~/.dsh`，再拼 `dsh-workbuddy-memory/`（0.2.0 起为 `dsh-memorybuddy/`）；代码里不含任何硬编码用户路径。
 - markdown + YAML front-matter 读写（自带最小 YAML 实现，不引入运行时依赖）。
 - 原子写：临时文件 + rename，并对 Windows 的瞬时 `EACCES`/`EBUSY`/`EPERM` 做重试退避。
 - 文件锁（`.lock` 同级文件）让并发写不丢数据：基于修订号校验，冲突时返回 409 并**把磁盘上的内容一起带回**，

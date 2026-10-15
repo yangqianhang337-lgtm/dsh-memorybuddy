@@ -488,7 +488,7 @@ export class SessionCollector {
       await this.markPending(relative, state.seq)
       this.host.onNote?.(relative)
     } catch (error) {
-      this.host.log(`workbuddy-memory: 会话笔记写入失败（${state.id}）：${String(error)}`)
+      this.host.log(`memorybuddy: 会话笔记写入失败（${state.id}）：${String(error)}`)
     }
   }
 

@@ -83,7 +83,7 @@ export function profileTemplate(now: string): string {
  * as 【用户指令】 (the section renders the file body, so boilerplate arrived as if
  * the user had ordered it — the persona sentence and this file are the two
  * halves of the prompt that are quoted verbatim), and it printed inside the
- * 「给 WorkBuddy 的指令」 card where the reference screenshot draws an empty box
+ * 「给 MemoryBuddy 的指令」 card where the reference screenshot draws an empty box
  * showing the placeholder. The panel's placeholder now carries the explanation.
  */
 export function instructionsTemplate(now: string): string {

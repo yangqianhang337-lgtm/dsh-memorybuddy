@@ -44,7 +44,7 @@ export interface CardProps {
    * Card heading, with an optional description under it.
    *
    * Omit both for a card whose rows are their own labels: the reference design
-   * headings only the cards that own a document (给 WorkBuddy 的指令 / 人设设定 /
+   * headings only the cards that own a document (给 MemoryBuddy 的指令 / 人设设定 /
    * 长期记忆 / 管理记忆). A card of plain setting rows starts straight at the
    * first row, so repeating its first row's label as a heading would print the
    * same words twice.
@@ -209,7 +209,7 @@ export function DocumentBody({
         <div className={css.loading}>{t('loading')}</div>
       ) : value.trim() === '' ? (
         // An empty document shows its placeholder when it has one: the reference
-        // draws 「给 WorkBuddy 的指令」 as a box whose only text is the example.
+        // draws 「给 MemoryBuddy 的指令」 as a box whose only text is the example.
         <div className={css.proseEmpty}>
           {placeholder === undefined || placeholder === '' ? t('empty') : placeholder}
         </div>

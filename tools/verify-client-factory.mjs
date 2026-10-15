@@ -99,7 +99,7 @@ const record = (label, ok, detail) => results.push({ label, ok, detail })
 record('one registration', registrations.length === 1, `${registrations.length} registration(s)`)
 
 const registration = registrations[0]
-record('registration id', registration?.id === 'dsh-workbuddy-memory', String(registration?.id))
+record('registration id', registration?.id === 'dsh-memorybuddy', String(registration?.id))
 
 let exports
 try {

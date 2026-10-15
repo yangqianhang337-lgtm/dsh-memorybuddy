@@ -151,7 +151,7 @@ export class Consolidator {
     try {
       await this.runInner(report, limit)
     } catch (error) {
-      this.log(`workbuddy-memory: 整理失败：${String(error)}`)
+      this.log(`memorybuddy: 整理失败：${String(error)}`)
       report.questions.push(`整理过程中出错：${String(error)}`)
     } finally {
       this.running = false

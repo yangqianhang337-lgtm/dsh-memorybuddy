@@ -32,9 +32,9 @@ export interface SettingsSectionProps {
 }
 
 /** `setting.section` id for 个性化; must stay stable across releases. */
-export const PERSONALIZE_SECTION_ID = 'workbuddy-personalize'
+export const PERSONALIZE_SECTION_ID = 'memorybuddy-personalize'
 /** `setting.section` id for 记忆与进化. */
-export const MEMORY_SECTION_ID = 'workbuddy-memory'
+export const MEMORY_SECTION_ID = 'memorybuddy-memory'
 
 /**
  * 个性化 as a native settings page.

@@ -23,7 +23,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { MemoryPage } from './memory.tsx'
 import { PersonalizePage } from './personalize.tsx'
-import { PANEL_ID, WorkBuddyPanelIcon } from './icons.tsx'
+import { PANEL_ID, MemoryBuddyPanelIcon } from './icons.tsx'
 import { t } from './t.ts'
 import { cx, panelCss as css } from './styles.ts'
 import type { MemoryFace } from './service.ts'
@@ -38,11 +38,11 @@ const PANEL_ORDER = 30
 /**
  * The main-slot page.
  *
- * The wrapper carries the pinned semantic anchors (`data-dsh-plugin="workbuddy"`
- * and `data-dsh-workbuddy-view`) that skins and automation resolve the panel
+ * The wrapper carries the pinned semantic anchors (`data-dsh-plugin="memorybuddy"`
+ * and `data-dsh-memorybuddy-view`) that skins and automation resolve the panel
  * through, the same practice the task board follows.
  */
-export function WorkBuddyPanel({ face }: { face: MemoryFace }): ReactNode {
+export function MemoryBuddyPanel({ face }: { face: MemoryFace }): ReactNode {
   const view = face.useView()
   const snapshot = view.snapshot
   const [page, setPage] = React.useState<View>('personalize')
@@ -63,7 +63,7 @@ export function WorkBuddyPanel({ face }: { face: MemoryFace }): ReactNode {
   ]
 
   return (
-    <div className={css.root} data-dsh-plugin="workbuddy" data-dsh-workbuddy-view={page}>
+    <div className={css.root} data-dsh-plugin="memorybuddy" data-dsh-memorybuddy-view={page}>
       <nav className={css.nav}>
         <Input
           className={css.search}
@@ -121,10 +121,10 @@ export function WorkBuddyPanel({ face }: { face: MemoryFace }): ReactNode {
 }
 
 /** The sidebar row glyph the shell asks for at its own size and active state. */
-export { WorkBuddyPanelIcon }
+export { MemoryBuddyPanelIcon }
 
 /** Register the panel's sidebar row and center-column page. */
-export function registerWorkBuddyPanel(
+export function registerMemoryBuddyPanel(
   ctx: { slots: unknown },
   face: MemoryFace,
 ): () => void {
@@ -146,7 +146,7 @@ export function registerWorkBuddyPanel(
           // call time.
           label: () => t('entry.label'),
         },
-        WorkBuddyPanelIcon,
+        MemoryBuddyPanelIcon,
       ),
     ),
   )
@@ -159,7 +159,7 @@ export function registerWorkBuddyPanel(
           key: PANEL_ID,
           inject: (): { face: MemoryFace } => ({ face }),
         },
-        WorkBuddyPanel as never,
+        MemoryBuddyPanel as never,
       ),
     ),
   )
