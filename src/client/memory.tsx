@@ -330,7 +330,13 @@ export function MemoryPage({
         description={t('card.manage.desc')}
         actions={
           <>
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => setResetOpen(true)}>
+            <Button
+              size="sm"
+              variant="outline"
+              className={css.danger}
+              disabled={busy}
+              onClick={() => setResetOpen(true)}
+            >
               {t('action.reset')}
             </Button>
             {indexEditing ? (
@@ -391,41 +397,47 @@ export function MemoryPage({
             }
           }}
         />
-        <div className={css.note}>{snapshot?.root ?? ''}</div>
+        {/* The reference card ends at its body; the panel adds the root path. */}
+        {!bare && <div className={css.note}>{snapshot?.root ?? ''}</div>}
       </Card>
 
       {/*
-        整理时机: the schedule and the manual pass. The reference has no seat for
-        them in the switch card, and the plan's §2.4 table puts the timing line
-        with the 管理记忆 card rather than inventing a row among the switches.
+        整理时机, 已记住的条目 and 最近的会话沉淀 are ours: the reference's page
+        ends at 管理记忆 followed by the privacy line, so the Settings drop
+        (`bare`) stops there to match it. The first-level panel keeps them —
+        that drop is where the schedule is configured, where the search box
+        highlights entries (§2.2 deviation 3) and where the collected sessions
+        are reviewed.
       */}
-      <Card title={t('memory.schedule')}>
-        <Row>
-          <div className={css.cardText}>
-            <div className={css.cardTitle}>{t('memory.last')}</div>
-            <div className={css.cardDesc}>
-              {snapshot?.consolidation.lastAt ?? t('memory.never')} · {t('memory.next')}：
-              {scheduleLine(t, snapshot)}
+      {!bare && (
+        <Card title={t('memory.schedule')}>
+          <Row>
+            <div className={css.cardText}>
+              <div className={css.cardTitle}>{t('memory.last')}</div>
+              <div className={css.cardDesc}>
+                {snapshot?.consolidation.lastAt ?? t('memory.never')} · {t('memory.next')}：
+                {scheduleLine(t, snapshot)}
+              </div>
             </div>
-          </div>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void consolidate()}>
-            {t('action.consolidate')}
-          </Button>
-        </Row>
-        <Row>
-          <div className={css.cardText}>
-            <div className={css.cardTitle}>{t('card.consolidateQuiet.title')}</div>
-            <div className={css.cardDesc}>{t('card.consolidateQuiet.desc')}</div>
-          </div>
-          <Switch
-            label={t('card.consolidateQuiet.title')}
-            checked={preferences?.consolidateQuiet ?? true}
-            disabled={busy || loading}
-            onChange={next => patchPreference('consolidateQuiet', next)}
-          />
-        </Row>
-        <div className={css.note}>{t('memory.modelStage')}</div>
-      </Card>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void consolidate()}>
+              {t('action.consolidate')}
+            </Button>
+          </Row>
+          <Row>
+            <div className={css.cardText}>
+              <div className={css.cardTitle}>{t('card.consolidateQuiet.title')}</div>
+              <div className={css.cardDesc}>{t('card.consolidateQuiet.desc')}</div>
+            </div>
+            <Switch
+              label={t('card.consolidateQuiet.title')}
+              checked={preferences?.consolidateQuiet ?? true}
+              disabled={busy || loading}
+              onChange={next => patchPreference('consolidateQuiet', next)}
+            />
+          </Row>
+          <div className={css.note}>{t('memory.modelStage')}</div>
+        </Card>
+      )}
 
       <DraftCards
         t={t}
@@ -443,51 +455,57 @@ export function MemoryPage({
         }}
       />
 
-      <div>
-        <div className={css.cardTitle}>{t('memory.entries')}</div>
-        <div className={css.subtitle}>
-          {needle === '' ? '' : `${t('memory.hits', { count: String(hitCount) })} · `}
-          {t('memory.entriesHint')}
-        </div>
-      </div>
-
-      {matched.length === 0 ? (
-        <div className={css.proseEmpty}>{t('memory.entriesEmpty')}</div>
-      ) : (
-        matched.map(group => (
-          <Card key={group.key} title={topicTitle(t, group.key)}>
-            <EntryList
-              entries={group.items}
-              topicTitle={topicTitle(t, group.key)}
-              t={t}
-              query={query}
-              onForget={id => setForget({ topic: group.key, id })}
-              onPin={(id, pinned) => void doPin(group.key, id, pinned)}
-            />
-          </Card>
-        ))
-      )}
-
-      <Card title={t('memory.sessions')}>
-        {sessions.length === 0 ? (
-          <div className={css.proseEmpty}>{t('memory.sessionsEmpty')}</div>
-        ) : (
-          <div className={cx(css.entries)}>
-            {sessions.map(item => (
-              <div className={css.entry} key={item.path}>
-                <div className={css.entryBody}>
-                  <div className={css.entryText}>{item.title === '' ? item.id : item.title}</div>
-                  <div className={css.entryMeta}>
-                    <span>{item.date}</span>
-                    <span>{t('memory.sessionEvents', { count: String(item.events) })}</span>
-                    <span>{item.consolidated ? t('memory.sessionDone') : t('memory.sessionPending')}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
+      {!bare && (
+        <>
+          <div>
+            <div className={css.cardTitle}>{t('memory.entries')}</div>
+            <div className={css.subtitle}>
+              {needle === '' ? '' : `${t('memory.hits', { count: String(hitCount) })} · `}
+              {t('memory.entriesHint')}
+            </div>
           </div>
-        )}
-      </Card>
+
+          {matched.length === 0 ? (
+            <div className={css.proseEmpty}>{t('memory.entriesEmpty')}</div>
+          ) : (
+            matched.map(group => (
+              <Card key={group.key} title={topicTitle(t, group.key)}>
+                <EntryList
+                  entries={group.items}
+                  topicTitle={topicTitle(t, group.key)}
+                  t={t}
+                  query={query}
+                  onForget={id => setForget({ topic: group.key, id })}
+                  onPin={(id, pinned) => void doPin(group.key, id, pinned)}
+                />
+              </Card>
+            ))
+          )}
+
+          <Card title={t('memory.sessions')}>
+            {sessions.length === 0 ? (
+              <div className={css.proseEmpty}>{t('memory.sessionsEmpty')}</div>
+            ) : (
+              <div className={cx(css.entries)}>
+                {sessions.map(item => (
+                  <div className={css.entry} key={item.path}>
+                    <div className={css.entryBody}>
+                      <div className={css.entryText}>{item.title === '' ? item.id : item.title}</div>
+                      <div className={css.entryMeta}>
+                        <span>{item.date}</span>
+                        <span>{t('memory.sessionEvents', { count: String(item.events) })}</span>
+                        <span>
+                          {item.consolidated ? t('memory.sessionDone') : t('memory.sessionPending')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </>
+      )}
 
       {/*
         The Settings drop reproduces the reference footer exactly: one centred

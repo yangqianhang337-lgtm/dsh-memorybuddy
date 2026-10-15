@@ -98,6 +98,12 @@ const PANEL_CSS = [
   '.wbFooterLink{padding:0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer}',
   '.wbFooterLink:hover{color:var(--dsw-alias-label-secondary)}',
   '.wbFooterLinks{display:flex;align-items:center;gap:8px}',
+  /*
+    The reference draws 重置 as an outlined button whose LABEL is red. There is
+    no danger Button variant in the primitives, so the tint is a wrapper class
+    that recolours the label through currentColor.
+  */
+  '.wbDanger{color:var(--dsw-alias-state-error-primary)}',
   '.wbNote{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
   '.wbError{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px}',
   '.wbLoading{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}',
@@ -146,6 +152,7 @@ export const panelCss = {
   footerCenter: 'wbFooterCenter',
   footerLink: 'wbFooterLink',
   footerLinks: 'wbFooterLinks',
+  danger: 'wbDanger',
   note: 'wbNote',
   error: 'wbError',
   loading: 'wbLoading',
