@@ -19,6 +19,7 @@ import {
   confidenceForDays,
   contradicts,
   dayKey,
+  daysBetween,
   entryId,
   parseEntries,
   similarity,
@@ -28,6 +29,7 @@ import { TOPICS, type Confidence, type EntryView, type ModelRunView, type TopicK
 import { frontString, parseDocument } from './document.ts'
 import type { Distiller } from './distill.ts'
 import { extractProjectFacts, type ProjectCandidate } from './project.ts'
+import { SkillGenerator, type GenerationReport } from './skills.ts'
 import type { MemoryStore, PluginState } from './store.ts'
 
 /** A candidate lifted out of one session note. */
@@ -58,28 +60,16 @@ export interface ConsolidationReport {
   projectAdded: number
   projectMerged: number
   projectFiles: string[]
+  /** Skill drafts generated this pass (P7). */
+  draftsCreated: string[]
+  /** Drafts nobody acted on for 30 days, moved into `archive/` (P7). */
+  draftsArchived: string[]
 }
 
 /** Decay windows, in days (memory-plan §5.3). */
 const DECAY_DAYS: Record<Confidence, number | null> = { 低: 30, 中: 90, 高: null }
 /** A 高-confidence entry is questioned after this long without a related session. */
 const STALE_QUESTION_DAYS = 180
-
-/** Parse `YYYY-MM-DD` into a local date, or `undefined`. */
-function parseDay(value: string): Date | undefined {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
-  if (match === null) return undefined
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-  return Number.isNaN(date.getTime()) ? undefined : date
-}
-
-/** Whole days between two `YYYY-MM-DD` values (negative when `later` is first). */
-export function daysBetween(earlier: string, later: string): number {
-  const a = parseDay(earlier)
-  const b = parseDay(later)
-  if (a === undefined || b === undefined) return 0
-  return Math.round((b.getTime() - a.getTime()) / 86_400_000)
-}
 
 /**
  * Lift candidate lines out of one session note body.
@@ -120,6 +110,7 @@ function topicFor(label: string | undefined): TopicKey {
 export class Consolidator {
   private readonly store: MemoryStore
   private readonly log: (message: string) => void
+  private readonly generator: SkillGenerator
   private running = false
   /**
    * The model stage, injected after construction.
@@ -134,6 +125,7 @@ export class Consolidator {
   constructor(store: MemoryStore, log: (message: string) => void) {
     this.store = store
     this.log = log
+    this.generator = new SkillGenerator(store, log)
   }
 
   /** Install the model stage. Called once the `llm` service is known. */
@@ -167,6 +159,8 @@ export class Consolidator {
       projectAdded: 0,
       projectMerged: 0,
       projectFiles: [],
+      draftsCreated: [],
+      draftsArchived: [],
     }
     if (this.running) {
       report.questions.push('上一次整理还在进行中，本次已跳过。')
@@ -263,9 +257,16 @@ export class Consolidator {
     }
     if (changedTopics.length > 0) await this.rebuildIndex(entriesByTopic)
 
+    // 5.1 Skill drafts (P7 §6.2 A/C). It runs AFTER the writes above on purpose:
+    //     the generator reads the merged entries and project files this pass
+    //     just produced, so a convention corroborated by the note that arrived
+    //     today can generate its draft in the very same pass instead of waiting
+    //     for the next one.
+    await this.skillStage(report)
+
     // 6. Journal, then clear the watermark. The order is deliberate: a note is
     //    only marked consolidated once its content is safely on disk.
-    if (consumed.length > 0 || changedTopics.length > 0) {
+    if (consumed.length > 0 || changedTopics.length > 0 || report.draftsCreated.length > 0 || report.draftsArchived.length > 0) {
       await this.store.appendJournal(this.journalLines(report, consumed, changedTopics))
     }
     // `patchState` merges against the file as it is *now*: the collector may have
@@ -279,6 +280,32 @@ export class Consolidator {
       questions: this.mergeQuestions(current.questions, report.questions),
       ...(report.model === undefined ? {} : { lastModelRun: report.model }),
     }))
+  }
+
+  /**
+   * Generate skill drafts and archive the stale ones (P7 §6.2 A/C).
+   *
+   * Two halves, in this order. Generation first, because a draft created today
+   * carries today's `createdAt` and the archive pass must not immediately judge
+   * it stale. The archive half is the plan's 30-day rule and is a move into
+   * `archive/skills-draft/`, never a delete.
+   *
+   * This method must never throw. A skill draft is a bonus on top of a pass whose
+   * topic writes are already on disk, and losing those to a scan hiccup would
+   * trade a durable outcome for a cosmetic one.
+   */
+  private async skillStage(report: ConsolidationReport): Promise<void> {
+    try {
+      const generation: GenerationReport = await this.generator.run(report.at)
+      report.draftsCreated = generation.created
+    } catch (error) {
+      this.log(`技能草稿生成失败：${String(error)}`)
+    }
+    try {
+      report.draftsArchived = await this.store.archiveStaleDrafts()
+    } catch (error) {
+      this.log(`技能草稿归档失败：${String(error)}`)
+    }
   }
 
   /**
@@ -596,6 +623,7 @@ export class Consolidator {
       `改写文件：${changed.length === 0 ? '（无）' : changed.map(topic => `memory/${topic.file}`).join('、')}`,
       ...this.modelLines(report),
       ...this.projectLines(report),
+      ...this.skillLines(report),
     ]
     if (report.questions.length > 0) {
       lines.push(`待确认 ${report.questions.length} 项：`)
@@ -633,6 +661,24 @@ export class Consolidator {
     return [
       `项目记忆：新增 ${report.projectAdded} 条 · 合并 ${report.projectMerged} 条（${report.projectFiles.join('、')}）`,
     ]
+  }
+
+  /**
+   * The journal's account of the skill stage (P7).
+   *
+   * Generation is reported even when it produced nothing, because the archive
+   * half usually does run: a pass that silently moved three drafts out of the
+   * pending list would otherwise leave the user wondering where they went.
+   */
+  private skillLines(report: ConsolidationReport): string[] {
+    const lines: string[] = []
+    if (report.draftsCreated.length > 0) {
+      lines.push(`技能草稿：新增 ${report.draftsCreated.length} 份（${report.draftsCreated.join('、')}）—— 等待你批准`)
+    }
+    if (report.draftsArchived.length > 0) {
+      lines.push(`技能草稿：${report.draftsArchived.length} 份超过 30 天未处理，已归档到 archive/skills-draft/`)
+    }
+    return lines
   }
 }
 

@@ -16,3 +16,7 @@ export { ModelPicker, COOLDOWN_MINUTES, allows, routeKey } from '../src/host/mod
 export { Distiller, TOTAL_BUDGET_MS, CALL_TIMEOUT_MS, MAX_ATTEMPTS, buildInput } from '../src/host/distill.ts'
 export { extractProjectFacts as extractProjectFactsImpl } from '../src/host/project.ts'
 export { PromptCache, slugify } from '../src/host/prompt.ts'
+export { SkillGenerator, MIN_DATES, MIN_REPEATS } from '../src/host/skills.ts'
+export { DRAFT_TTL_DAYS, isSkillName, redact } from '../src/host/store.ts'
+export { NO_MEMORY_MARKER, clearMarkerCache, isNoMemoryWorkspace, isUntrustedEvent } from '../src/host/privacy.ts'
+export { WIPE_CONFIRMATION } from '../src/protocol.ts'

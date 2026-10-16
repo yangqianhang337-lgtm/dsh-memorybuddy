@@ -35,6 +35,28 @@ export function dayKey(date: Date = new Date()): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
+/** Parse `YYYY-MM-DD` into a local date, or `undefined`. */
+export function parseDay(value: string): Date | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (match === null) return undefined
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+/**
+ * Whole days between two `YYYY-MM-DD` values (negative when `later` is first).
+ *
+ * Both ends are read as LOCAL dates, never as UTC instants: a `dayKey` is a wall
+ * clock label, and parsing it as UTC puts a date in the previous day for anyone
+ * west of Greenwich — which shows up as an entry decaying one day early.
+ */
+export function daysBetween(earlier: string, later: string): number {
+  const a = parseDay(earlier)
+  const b = parseDay(later)
+  if (a === undefined || b === undefined) return 0
+  return Math.round((b.getTime() - a.getTime()) / 86_400_000)
+}
+
 /** A confidence one rung above `current`, capped at 高. */
 export function raiseConfidence(current: Confidence): Confidence {
   const index = CONFIDENCES.indexOf(current)

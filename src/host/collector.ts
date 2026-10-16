@@ -21,6 +21,7 @@
 import { TOPICS } from '../protocol.ts'
 import type { MemoryStore } from './store.ts'
 import { dayKey } from './entries.ts'
+import { isNoMemoryWorkspace, isUntrustedEvent, NO_MEMORY_MARKER } from './privacy.ts'
 
 /** How long a session may go quiet before its note is considered final. */
 const IDLE_FINALIZE_MS = 120_000
@@ -198,6 +199,20 @@ export class SessionCollector {
       return
     }
     const state = this.stateFor(session)
+    // `undefined` means the session is excluded by a `.no-memory` marker: it was
+    // never buffered, so there is nothing to record and nothing to flush.
+    if (state === undefined) return
+    // Re-check on every event, not only at creation. The plan says 「采集器挂载与
+    // 会话事件时检查」, and the difference is a real one: someone who drops a
+    // `.no-memory` into a project mid-session means "stop now", not "stop after
+    // this session". The buffered content collected before the marker appeared is
+    // dropped with the state, because a note that recorded 「标记出现之前」 is still
+    // a note from a session the user asked not to be recorded.
+    if (isNoMemoryWorkspace(state.workspace)) {
+      this.sessions.delete(session.id)
+      this.host.log(`工作目录出现 ${NO_MEMORY_MARKER} 标记，已停止并丢弃本次会话的缓冲内容`)
+      return
+    }
     // First sight of a session that predates the plugin: replay its log first,
     // so the live event below lands on top of the history rather than replacing it.
     if (!state.backfilled) this.backfill(session, event.seq)
@@ -216,6 +231,8 @@ export class SessionCollector {
   async flush(session: SessionLike): Promise<void> {
     const state = this.sessions.get(session.id)
     if (state === undefined) return
+    // The marker can appear between two events; a flush must honour it too, or
+    // the timer would write the very note `observe` refused to extend.
     await this.enqueue(async () => {
       await this.persist(state)
     })
@@ -227,6 +244,9 @@ export class SessionCollector {
     if (state === undefined) return
     this.clearTimers(state)
     this.sessions.delete(session.id)
+    // Same reason as `flush`: `dispose` is the last chance to write, so it is the
+    // last chance to honour a marker that appeared mid-session.
+    if (isNoMemoryWorkspace(state.workspace)) return
     await this.enqueue(async () => {
       state.finalized = true
       await this.persist(state)
@@ -245,7 +265,10 @@ export class SessionCollector {
     for (const session of sessions) {
       if (this.sessions.has(session.id)) continue
       if (this.sessions.size >= MAX_SESSIONS_TRACKED) return
-      this.stateFor(session)
+      // `stateFor` returns `undefined` for a `.no-memory` session; it must not
+      // be created, and must not be backfilled either.
+      const state = this.stateFor(session)
+      if (state === undefined) continue
       // An adopted session is one that was already running: replay its log or
       // its note will claim the session did nothing.
       this.backfill(session)
@@ -257,17 +280,34 @@ export class SessionCollector {
     return this.sessions.size
   }
 
-  /** Live state of one session, creating it on first sight. */
-  private stateFor(session: SessionLike): SessionState {
+  /**
+   * Live state of one session, creating it on first sight.
+   *
+   * Returns `undefined` when the session must not be collected at all — a
+   * `.no-memory` marker in its working directory (P8 §5.2 row 6). The decision is
+   * made HERE, before any event is buffered, because 「整会话不采集」 means no note
+   * is ever written: a session that was buffered and filtered afterwards would
+   * still have had its events held in memory, and would still write a note if the
+   * filter were ever missed.
+   *
+   * The check costs one `statSync`, and it is paid ONCE per session (at
+   * creation), not per event — which is why it can be synchronous at all and why
+   * the event path stays allocation-free.
+   */
+  private stateFor(session: SessionLike): SessionState | undefined {
     const existing = this.sessions.get(session.id)
     if (existing !== undefined) {
       const workspace = sessionWorkspace(session)
       if (workspace !== '' && existing.workspace === '') existing.workspace = workspace
       return existing
     }
-    const state: SessionState = {
+    const workspace = sessionWorkspace(session)
+    if (isNoMemoryWorkspace(workspace)) {
+      this.host.log(`工作目录带 ${NO_MEMORY_MARKER} 标记，本次会话不采集（${workspace}）`)
+      return undefined
+    }    const state: SessionState = {
       id: session.id,
-      workspace: sessionWorkspace(session),
+      workspace,
       started: new Date().toISOString(),
       ended: null,
       turns: 0,
@@ -302,6 +342,7 @@ export class SessionCollector {
   backfill(session: SessionLike, uptoExclusive = Number.POSITIVE_INFINITY): void {
     if (!this.host.enabled()) return
     const state = this.sessions.get(session.id) ?? this.stateFor(session)
+    if (state === undefined) return
     if (state.backfilled) return
     state.backfilled = true
     const snapshot = session.snapshotEvents
@@ -504,7 +545,20 @@ export class SessionCollector {
     const assistantLines = state.events.filter(event => event.kind === 'assistant')
     const toolLines = state.events.filter(event => event.kind === 'tool')
     const candidates: string[] = []
-    for (const event of userLines) {
+    // P8 §5.2 row 4 (防投毒): only the USER's own words may become memory
+    // candidates.
+    //
+    // The loop runs over EVERY event and `isUntrustedEvent` does the filtering,
+    // rather than iterating `userLines` and adding a redundant guard. Both
+    // express the same rule, but only this one makes the rule load-bearing: with
+    // the loop narrowed to `userLines`, deleting the guard line changes nothing,
+    // so the security property silently rests on a variable name instead of on a
+    // checked predicate. Here, deleting the predicate immediately starts letting
+    // assistant text through — which is the whole attack, since an assistant
+    // reply quoting `web_fetch` output is exactly what a prompt injection
+    // supplies.
+    for (const event of state.events) {
+      if (isUntrustedEvent(event.kind)) continue
       for (const { label, pattern } of PREFERENCE_PATTERNS) {
         if (!pattern.test(event.text)) continue
         candidates.push(`- (候选 · ${label}) ${excerpt(event.text, 160)} · seq ${event.seq}`)

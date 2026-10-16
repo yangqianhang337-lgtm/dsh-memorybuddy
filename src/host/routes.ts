@@ -1,9 +1,9 @@
 /**
- * The HTTP surface: one prefix, seven routes, and the same auth fence the
+ * The HTTP surface: one prefix, eight routes, and the same auth fence the
  * task-board plugin uses.
  *
- * The seven are `state`, `models`, `consolidate-status`, `save`, `preferences`,
- * `journal` and `action`.
+ * The eight are `state`, `models`, `consolidate-status`, `save`, `preferences`,
+ * `draft`, `journal` and `action`.
  *
  * The prefix is root-absolute (`/api/memorybuddy`) because the route table
  * matches on the request URL; the browser half builds its URLs from
@@ -84,6 +84,14 @@ export interface RoutesHost {
   /** Re-render the injected prompt section after a write. */
   onChanged: () => void
   log: (message: string) => void
+  /**
+   * Drop every in-memory session buffer without writing it.
+   *
+   * Needed only by 彻底删除: a session buffered before the wipe would otherwise
+   * flush itself on its next timer tick and recreate the memory root, along with
+   * the content the user was just told had been destroyed.
+   */
+  forgetSessions?: () => void
   /**
    * Live runtime facts (`running`, the resolved model pick).
    *
@@ -228,6 +236,20 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
     },
     {
       kind: 'exact',
+      path: `${API_PREFIX}/draft`,
+      handler: async (request, response) => {
+        if (request.method !== 'GET') return writeJson(response, 405, { ok: false, error: 'method-not-allowed' })
+        if (!guard(request, response)) return
+        const url = new URL(request.url ?? '/', 'http://localhost')
+        const draft = await host.store.readDraft(url.searchParams.get('name') ?? '')
+        // A draft the user just approved is not an error: the dialog asks for it,
+        // the action already removed it, and the panel treats 404 as "close".
+        if (draft === undefined) return writeJson(response, 404, { ok: false, error: 'draft-not-found' })
+        writeJson(response, 200, { ok: true, draft })
+      },
+    },
+    {
+      kind: 'exact',
       path: `${API_PREFIX}/journal`,
       handler: async (request, response) => {
         if (request.method !== 'GET') return writeJson(response, 405, { ok: false, error: 'method-not-allowed' })
@@ -279,6 +301,16 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
         try {
           const result = await runAction(host, record as unknown as MemoryAction)
           host.onChanged()
+          // After 彻底删除 the snapshot would REBUILD the tree: `snapshot()`
+          // calls `ensure()`, which recreates the skeleton and every directory the
+          // wipe just removed — including the approved-skill index the wipe had
+          // to read. Reporting an empty-but-present root while saying 「已彻底删除」
+          // is worse than reporting nothing, so the response carries the result
+          // alone and the panel treats it as 「everything is gone」. The next real
+          // `GET /state` recreates the skeleton, which is the correct moment.
+          if (record.kind === 'wipe-all') {
+            return writeJson(response, 200, { ok: true, result, wiped: true })
+          }
           writeJson(response, 200, { ok: true, result, snapshot: await withRuntime(await host.store.snapshot()) })
         } catch (error) {
           host.log(`动作失败：${String(error)}`)
@@ -297,6 +329,18 @@ async function runAction(host: RoutesHost, action: MemoryAction): Promise<unknow
       return { path: action.path }
     case 'reset-all':
       return await host.store.resetAll()
+    case 'wipe-all': {
+      // 彻底删除: the store refuses anything but the exact phrase. The type is
+      // re-checked here so a malformed body arrives as `''` (which fails the
+      // check loudly) rather than as `undefined` sliding into the comparison.
+      const confirmed = typeof action.confirm === 'string' ? action.confirm : ''
+      // Buffers are dropped BEFORE the delete, not after: a session mid-flight
+      // must not get a chance to flush itself back into the tree we are removing.
+      host.forgetSessions?.()
+      const result = await host.store.wipeAll(confirmed)
+      host.log(`彻底删除完成：记忆根与 ${result.skills.length} 个技能已删除`)
+      return result
+    }
     case 'forget-entry':
       return { removed: await host.store.editEntry(action.topic as never, action.id, { remove: true }) }
     case 'pin-entry':
@@ -306,9 +350,18 @@ async function runAction(host: RoutesHost, action: MemoryAction): Promise<unknow
     case 'rollback':
       return await host.store.rollback(action.date)
     case 'approve-draft':
-      return { approved: await host.store.approveDraft(action.name) }
-    case 'discard-draft':
-      return { discarded: await host.store.discardDraft(action.name) }
+      // `text` is validated here rather than cast: it is the only route payload
+      // that becomes file CONTENT in the skills root, so a non-string body would
+      // otherwise reach `writeFileAtomic` as-is. `approveDraft` also refuses a
+      // name with no pending draft, so this can only ever re-write an existing one.
+      return {
+        approved: await host.store.approveDraft(
+          action.name,
+          typeof action.text === 'string' ? action.text : undefined,
+        ),
+      }
+    case 'ignore-draft':
+      return { ignored: await host.store.ignoreDraft(action.name) }
     case 'forget-project':
       return { forgotten: await host.store.archiveProject(action.slug) }
     default:

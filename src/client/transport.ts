@@ -14,6 +14,7 @@ import { API_PREFIX } from '../protocol'
 import type {
   ConsolidateStatus,
   DocumentView,
+  DraftDetail,
   EntryView,
   JournalView,
   MemorySnapshot,
@@ -48,11 +49,13 @@ export interface SaveConflict {
   revision: string
 }
 
-/** One pending-approval draft plus its body, as the panel shows it. */
-export interface DraftDetail extends DraftView {
-  body: string
-}
-
+/**
+ * One pending-approval draft in full (P7 §6.2 B).
+ *
+ * Re-exported from `protocol.ts` rather than declared here: the host owns the
+ * shape, and a second declaration could drift from what the store returns.
+ */
+export type { DraftDetail } from '../protocol'
 export interface MemoryState {
   snapshot: MemorySnapshot
 }
@@ -136,13 +139,21 @@ export class MemoryApi {
     return asSnapshot(value?.snapshot)
   }
 
-  /** Run one of the panel's actions (reset, forget, pin, approve…). */
-  async action(action: Record<string, unknown>): Promise<MemorySnapshot> {
+  /**
+   * Run one of the panel's actions (reset, forget, pin, approve…).
+   *
+   * Returns `undefined` for 彻底删除, which is the one action with no snapshot:
+   * the host deliberately omits it because building a snapshot would recreate
+   * the very directory the user just deleted. The panel treats that as 「重新
+   * 加载」 rather than as a malformed response — see `MemoryController.act`.
+   */
+  async action(action: Record<string, unknown>): Promise<MemorySnapshot | undefined> {
     const value = (await request(`${CLIENT_PREFIX}/action`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action }),
     })) as { snapshot?: unknown }
+    if (value?.snapshot === undefined) return undefined
     return asSnapshot(value?.snapshot)
   }
 
@@ -164,6 +175,27 @@ export class MemoryApi {
       snapshot: asSnapshot(value?.snapshot),
       started: value?.result?.started === true,
       ...(reason === undefined ? {} : { reason }),
+    }
+  }
+
+  /**
+   * Read one draft in full, for the detail dialog (P7 §6.2 B).
+   *
+   * A draft that no longer exists resolves to `undefined` rather than throwing:
+   * the dialog is opened from a list that may be one approval behind (the action
+   * and the click raced), and 「已经处理完了」 is the correct answer, not an error.
+   */
+  async draft(name: string): Promise<DraftDetail | undefined> {
+    try {
+      const value = (await request(
+        `${CLIENT_PREFIX}/draft?name=${encodeURIComponent(name)}`,
+        { cache: 'no-store' },
+      )) as { draft?: unknown }
+      const record = value?.draft as DraftDetail | undefined
+      return record !== undefined && typeof record.name === 'string' ? record : undefined
+    } catch (error) {
+      if (error instanceof MemoryApiError && error.kind === 'status') return undefined
+      throw error
     }
   }
 

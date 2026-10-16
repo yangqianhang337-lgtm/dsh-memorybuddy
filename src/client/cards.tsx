@@ -31,6 +31,7 @@ import {
   Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { panelCss as css, cx } from './styles'
+import type { DraftDetail } from '../protocol'
 
 /** Translator handed down through `inject()`. */
 export type Translate = (key: string, params?: Record<string, string>) => string
@@ -778,10 +779,219 @@ export function ToastHost({ token, text, tone, onDone }: ToastHostProps): React.
   )
 }
 
+/**
+ * The skill-draft detail dialog (memory-plan §6.2 step 4, P7).
+ *
+ * It shows the three things the plan requires a draft detail page to show — the
+ * full content preview, the path 批准 writes to, and the source sessions — and
+ * carries the plan's three buttons: 批准 / 编辑后批准 / 忽略.
+ *
+ * The preview and the editor are two views of ONE text. That is deliberate and it
+ * is the reason 编辑后批准 is honest: what the user edits is exactly the string
+ * that gets written, so the `onApprove(text)` callback receives the same bytes the
+ * preview was showing. A separate "edit a summary, write something else" path
+ * would let the two drift, and the user would approve a file they never saw.
+ */
+export interface DraftDialogProps {
+  /** The draft being shown; `undefined` closes the dialog. */
+  draft: DraftDetail | undefined
+  t: Translate
+  loading: boolean
+  /** True while an action is in flight. */
+  busy: boolean
+  /** Called with the text to promote; omitted = promote verbatim. */
+  onApprove: (text?: string) => void
+  onIgnore: () => void
+  onClose: () => void
+}
+
+export function DraftDialog({
+  draft,
+  t,
+  loading,
+  busy,
+  onApprove,
+  onIgnore,
+  onClose,
+}: DraftDialogProps): React.ReactElement | null {
+  const [editing, setEditing] = React.useState(false)
+  const [draftText, setDraftText] = React.useState('')
+
+  // The editor text follows the loaded draft, and only while not editing: a
+  // snapshot arriving mid-edit must not overwrite what the user is typing.
+  React.useEffect(() => {
+    if (draft !== undefined && !editing) setDraftText(draft.text)
+  }, [draft, editing])
+
+  // Switching to the editor is the moment the loaded text becomes the thing the
+  // user will edit, so the toggle seeds the draft rather than starting empty.
+  const startEditing = (): void => {
+    if (draft !== undefined) setDraftText(draft.text)
+    setEditing(true)
+  }
+
+  if (draft === undefined && !loading) return null
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={draft === undefined ? t('draft.detail.title') : draft.title}
+      closeLabel={t('action.cancel')}
+      footer={
+        <>
+          <Button variant="outline" disabled={busy || draft === undefined} onClick={onIgnore}>
+            {t('draft.ignore')}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={busy || draft === undefined}
+            onClick={() => (editing ? setEditing(false) : startEditing())}
+          >
+            {editing ? t('action.preview') : t('draft.editApprove')}
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || draft === undefined}
+            onClick={() => {
+              setEditing(false)
+              onApprove(editing && draftText.trim() !== '' ? draftText : undefined)
+            }}
+            data-modal-autofocus=""
+          >
+            {t('action.approve')}
+          </Button>
+        </>
+      }
+    >
+      {draft === undefined ? (
+        <div className={css.proseEmpty}>{t('draft.detail.loading')}</div>
+      ) : (
+        <>
+          <div className={css.cardDesc}>{draft.description}</div>
+          <div className={css.entryMeta}>
+            <span>
+              {t('draft.detail.whenToUse')}：{draft.whenToUse}
+            </span>
+          </div>
+          <div className={css.entryMeta}>
+            <span>
+              {t('draft.detail.target')}：<code>{draft.target}</code>
+            </span>
+          </div>
+          <div className={css.entryMeta}>
+            <span>
+              {t('draft.detail.sources')}（{draft.derivedFrom.length}）：
+              {draft.derivedFrom.map(item => item.replace(/^sessions\//, '').replace(/\.md$/, '')).join('、')}
+            </span>
+          </div>
+          {editing && <div className={css.cardDesc}>{t('draft.detail.saveHint')}</div>}
+          <DocumentBody
+            t={t}
+            value={draft.text}
+            draft={draftText}
+            onDraft={setDraftText}
+            editing={editing}
+            tall
+            ariaLabel={draft.path}
+          />
+        </>
+      )}
+    </Modal>
+  )
+}
+
+/**
+ * The 彻底删除 gate (P8) — the only irreversible dialog in the plugin.
+ *
+ * Every other destructive-looking action here archives. This one deletes, so it
+ * does not get a yes/no: the user must TYPE the phrase. A second click would not
+ * distinguish 「我确定」 from 「我又点了一下」, and that difference is the user's
+ * whole memory.
+ *
+ * The confirm button stays DISABLED until the typed text matches exactly — case
+ * included, because a case-insensitive match would let muscle memory through and
+ * defeat the point of typing something at all.
+ */
+export interface TypedConfirmProps {
+  open: boolean
+  title: string
+  body: string
+  /** What the user must type; rendered in the hint. */
+  phrase: string
+  /** The sentence telling the user to type `phrase`, already localized. */
+  hint: string
+  /** Extra line above the input, e.g. the exact path being removed. */
+  detail?: string
+  confirmLabel: string
+  cancelLabel: string
+  /** Disables the confirm button while an action is in flight. */
+  busy?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+export function TypedConfirm({
+  open,
+  title,
+  body,
+  phrase,
+  hint,
+  detail,
+  confirmLabel,
+  cancelLabel,
+  busy = false,
+  onConfirm,
+  onCancel,
+}: TypedConfirmProps): React.ReactElement {
+  const [typed, setTyped] = React.useState('')
+  // Reset on open: a phrase typed for a previous prompt must not arm this one.
+  React.useEffect(() => {
+    if (open) setTyped('')
+  }, [open])
+  // `busy` joins the arming test so a double-click cannot fire two wipes: the
+  // modal is not unmounted until the host answers, and two `rm -rf` in flight is
+  // not a state worth being in.
+  const armed = typed === phrase && !busy
+  return (
+    <Modal
+      open={open}
+      onClose={onCancel}
+      title={title}
+      closeLabel={cancelLabel}
+      footer={
+        <>
+          <Button variant="outline" onClick={onCancel}>
+            {cancelLabel}
+          </Button>
+          <Button variant="primary" disabled={!armed} onClick={onConfirm} data-modal-autofocus="">
+            {confirmLabel}
+          </Button>
+        </>
+      }
+    >
+      <div className={css.cardDesc}>{body}</div>
+      {detail !== undefined && detail !== '' && <div className={css.entryMeta}>{detail}</div>}
+      <div className={css.entryMeta}>{hint}</div>
+      {/* Focus goes to the input, NOT to the disabled confirm button: autofocus
+          on a disabled control lands nowhere, and the one thing the user has to
+          do here is type. */}
+      <textarea
+        className={cx(css.editor, css.editorTall)}
+        value={typed}
+        onChange={event => setTyped(event.currentTarget.value)}
+        aria-label={phrase}
+        spellCheck={false}
+        autoComplete="off"
+        data-modal-autofocus=""
+      />
+    </Modal>
+  )
+}
+
 /* ------------------------------------------------------------------ *
  * Banner
  * ------------------------------------------------------------------ */
-
 export interface BannerProps {
   text: string
   action?: React.ReactNode

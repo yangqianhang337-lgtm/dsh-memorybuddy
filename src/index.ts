@@ -654,6 +654,14 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
     },
     log,
     /**
+     * 彻底删除 (P8) drops every in-memory session buffer before the delete runs.
+     *
+     * Without this a session that was mid-flight at wipe time flushes itself on
+     * its next timer tick and recreates the memory root together with the content
+     * the user was just told had been destroyed.
+     */
+    forgetSessions: () => collector.forgetAll(),
+    /**
      * Live facts, computed per request.
      *
      * `running` comes from the consolidator itself; the model pick is validated

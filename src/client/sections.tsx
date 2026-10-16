@@ -86,6 +86,7 @@ export function MemorySettingsSection(props: SettingsSectionProps): React.ReactE
       onAction={face.onAction}
       onConsolidate={face.onConsolidate}
       onJournal={face.onJournal}
+      onDraft={face.onDraft}
       onCatalog={face.onCatalog}
       heading={false}
       bare

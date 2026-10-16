@@ -198,6 +198,27 @@ export interface DraftView {
   repeats: number
 }
 
+/**
+ * One draft in full, for the detail dialog (P7 §6.2 B).
+ *
+ * The dialog must be able to show everything the plan lists — the complete
+ * content preview, the path 批准 would write, and the sessions the draft came
+ * from — without a second round trip per field, so all of it rides the snapshot's
+ * sibling read.
+ */
+export interface DraftDetail extends DraftView {
+  /** The complete `SKILL.md` text, front-matter included, as 批准 would write it. */
+  text: string
+  /** Just the body, for the rendered preview pane. */
+  body: string
+  description: string
+  whenToUse: string
+  /** Session notes the pattern was mined from. */
+  derivedFrom: string[]
+  /** The absolute path 批准 writes to. */
+  target: string
+}
+
 /** One project memory file under `memory/projects/<slug>.md` (P6). */
 export interface ProjectView {
   slug: string
@@ -312,6 +333,17 @@ export interface PreferencesPatch {
   revision?: string
 }
 
+/**
+ * The phrase a 彻底删除 must be confirmed with (P8).
+ *
+ * A typed word rather than a second click, because this is the only operation in
+ * the plugin that cannot be undone: everything else archives. It lives here, not
+ * in the host half, so the panel and the route compare against the SAME constant
+ * — two copies would drift, and a drift would show up as a button that cannot be
+ * armed at all.
+ */
+export const WIPE_CONFIRMATION = 'DELETE'
+
 /** Manual actions the panel can trigger. */
 export type MemoryAction =
   | { kind: 'consolidate' }
@@ -321,8 +353,18 @@ export type MemoryAction =
   | { kind: 'pin-entry'; topic: string; id: string; pinned: boolean }
   | { kind: 'dismiss-question'; index: number }
   | { kind: 'rollback'; date: string }
-  | { kind: 'approve-draft'; name: string }
-  | { kind: 'discard-draft'; name: string }
+  /**
+   * 彻底删除 (P8) — the only irreversible action in the plugin.
+   *
+   * `confirm` must be the literal phrase the panel makes the user type; the host
+   * re-checks it rather than trusting that the client did, because a client that
+   * skipped the prompt would make the fence decorative.
+   */
+  | { kind: 'wipe-all'; confirm: string }
+  /** `text` carries the edited file for 编辑后批准; omitted promotes verbatim. */
+  | { kind: 'approve-draft'; name: string; text?: string }
+  /** Archives the draft under `archive/skills-draft/` — it is never deleted. */
+  | { kind: 'ignore-draft'; name: string }
   | { kind: 'forget-project'; slug: string }
 
 /** Save outcome. `conflict` carries the on-disk text so no edit is lost. */

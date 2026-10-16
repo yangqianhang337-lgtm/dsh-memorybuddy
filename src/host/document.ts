@@ -11,6 +11,9 @@
 import { createHash } from 'node:crypto'
 import { parseFrontMatter, stringifyFrontMatter, type FrontMatterValue } from './yaml.ts'
 
+/** Re-exported so a module writing front-matter needs only `document.ts`. */
+export type { FrontMatterValue }
+
 /** A parsed document. */
 export interface MarkdownDocument {
   front: Record<string, FrontMatterValue>

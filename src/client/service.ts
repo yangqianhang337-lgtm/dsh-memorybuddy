@@ -10,7 +10,14 @@
 
 import * as React from 'react'
 import { MemoryApi, MemoryApiError } from './transport'
-import type { ConsolidateStatus, JournalView, MemorySnapshot, ModelCatalog, PreferencesView } from '../protocol'
+import type {
+  ConsolidateStatus,
+  DraftDetail,
+  JournalView,
+  MemorySnapshot,
+  ModelCatalog,
+  PreferencesView,
+} from '../protocol'
 
 /** What the panel needs to render, in one immutable value. */
 export interface MemoryView {
@@ -55,6 +62,14 @@ export interface MemoryFace {
   onConsolidate: () => Promise<{ started: boolean; reason?: string }>
   /** Read one journal day, for the history view. */
   onJournal: (date: string) => Promise<JournalView | undefined>
+  /**
+   * Read one skill draft in full, for the detail dialog (P7 §6.2 B).
+   *
+   * Separate from `onAction` because it is a READ of one file's full text, not a
+   * state change: the dialog needs the whole `SKILL.md` (front-matter included,
+   * because that is what approval copies verbatim) before the user decides.
+   */
+  onDraft: (name: string) => Promise<DraftDetail | undefined>
   /**
    * The runtime's model catalogue, for the picker's dropdown.
    *
@@ -198,16 +213,26 @@ export class MemoryController {
     this.set({ conflict: undefined })
   }
 
-  /** Run a host action and adopt the snapshot it returns. */
+  /**
+   * Run a host action and adopt the snapshot it returns.
+   *
+   * 彻底删除 (P8) is answered WITHOUT a snapshot — building one would recreate
+   * the memory root the user just asked us to destroy. That case reloads instead
+   * of adopting, so the panel shows a genuinely empty memory rather than a stale
+   * list of entries that no longer exist on disk.
+   */
   async act(action: Record<string, unknown>): Promise<boolean> {
     this.set({ busy: true })
+    let snapshot: MemorySnapshot | undefined
     try {
-      const snapshot = await this.api.action(action)
+      snapshot = await this.api.action(action)
       this.set({ snapshot, busy: false, error: undefined })
       return true
     } catch (error) {
       this.set({ busy: false, error: this.describe(error, 'save') })
       return false
+    } finally {
+      if (snapshot === undefined) await this.load()
     }
   }
 
@@ -296,6 +321,23 @@ export class MemoryController {
   async journal(date: string): Promise<JournalView | undefined> {
     try {
       return await this.api.journal(date)
+    } catch (error) {
+      this.set({ error: this.describe(error, 'load') })
+      return undefined
+    }
+  }
+
+  /**
+   * Read one skill draft in full, for the detail dialog (P7 §6.2 B).
+   *
+   * A `undefined` result (the draft is gone) is a NORMAL outcome, not an error:
+   * the list the dialog was opened from can be one approval behind. The transport
+   * already maps the host's 404 to `undefined`; this keeps that contract on the
+   * controller without turning a stale click into a page-level error banner.
+   */
+  async draft(name: string): Promise<DraftDetail | undefined> {
+    try {
+      return await this.api.draft(name)
     } catch (error) {
       this.set({ error: this.describe(error, 'load') })
       return undefined

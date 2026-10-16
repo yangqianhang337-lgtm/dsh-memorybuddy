@@ -141,6 +141,7 @@ function applyInner(ctx: ClientLike): void {
     onAction: (action: Record<string, unknown>): Promise<boolean> => controller.act(action),
     onConsolidate: () => controller.consolidate(),
     onJournal: (date: string) => controller.journal(date),
+    onDraft: (name: string) => controller.draft(name),
     onCatalog: () => controller.catalog(),
   }
 

@@ -128,7 +128,6 @@ export interface Dictionary {
   'action.pin': string
   'action.unpin': string
   'action.approve': string
-  'action.discard': string
   'action.retry': string
   'action.reload': string
   'action.history': string
@@ -160,6 +159,14 @@ export interface Dictionary {
   'confirm.rollback.title': string
   'confirm.rollback.body': string
   'confirm.rollback.ok': string
+  'wipe.card.title': string
+  'wipe.card.desc': string
+  'wipe.button': string
+  'confirm.wipe.title': string
+  'confirm.wipe.body': string
+  'confirm.wipe.hint': string
+  'confirm.wipe.ok': string
+  'toast.wiped': string
   'conflict.title': string
   'conflict.body': string
   'conflict.keepMine': string
@@ -176,6 +183,16 @@ export interface Dictionary {
   'draft.card.title': string
   'draft.repeats': string
   'draft.source': string
+  'draft.view': string
+  'draft.ignore': string
+  'draft.editApprove': string
+  'draft.detail.title': string
+  'draft.detail.target': string
+  'draft.detail.sources': string
+  'draft.detail.whenToUse': string
+  'draft.detail.loading': string
+  'draft.detail.gone': string
+  'draft.detail.saveHint': string
 
   /* Documents shown inside the memory page */
   'doc.persona': string
@@ -295,7 +312,6 @@ const zh: Dictionary = {
   'action.pin': '固定',
   'action.unpin': '取消固定',
   'action.approve': '批准',
-  'action.discard': '丢弃',
   'action.retry': '重试',
   'action.reload': '重新加载',
   'action.history': '历史',
@@ -326,6 +342,15 @@ const zh: Dictionary = {
   'confirm.rollback.title': '回滚到这一天的备份？',
   'confirm.rollback.body': '当天备份覆盖的文件会被写回，回滚前的当前状态会先再备份一次。',
   'confirm.rollback.ok': '回滚',
+  'wipe.card.title': '危险区',
+  'wipe.card.desc': '彻底删除会永久移除本机上的全部记忆，以及本插件批准生成的技能。这是唯一不可撤销的操作；上面的「重置」只是归档，随时可以移回。',
+  'wipe.button': '彻底删除全部记忆',
+  'confirm.wipe.title': '彻底删除全部记忆？',
+  'confirm.wipe.body':
+    '这会永久删除记忆目录下的全部内容（memory/、sessions/、journal/、archive/、人设与指令），以及本插件批准生成到技能目录的技能文件。不会进入回收站，无法恢复。',
+  'confirm.wipe.hint': '输入 DELETE 以确认',
+  'confirm.wipe.ok': '永久删除',
+  'toast.wiped': '已彻底删除',
   'conflict.title': '这份内容在别处被改过',
   'conflict.body': '你的编辑没有丢：选择保留哪一份，或取消后手工合并。',
   'conflict.keepMine': '用我的覆盖',
@@ -341,6 +366,16 @@ const zh: Dictionary = {
   'draft.card.title': '待批准技能',
   'draft.repeats': '重复 {count} 次',
   'draft.source': '来自会话',
+  'draft.view': '查看',
+  'draft.ignore': '忽略',
+  'draft.editApprove': '编辑后批准',
+  'draft.detail.title': '技能草稿详情',
+  'draft.detail.target': '批准后写入',
+  'draft.detail.sources': '来源会话',
+  'draft.detail.whenToUse': '何时使用',
+  'draft.detail.loading': '正在读取草稿…',
+  'draft.detail.gone': '这份草稿已经不在了（可能刚刚被处理）。',
+  'draft.detail.saveHint': '编辑后批准：改动会原样写入上面这个路径。',
 
   'doc.persona': '人设设定',
   'doc.instructions': '给 MemoryBuddy 的指令',
@@ -459,7 +494,6 @@ const en: Dictionary = {
   'action.pin': 'Pin',
   'action.unpin': 'Unpin',
   'action.approve': 'Approve',
-  'action.discard': 'Discard',
   'action.retry': 'Retry',
   'action.reload': 'Reload',
   'action.history': 'History',
@@ -492,6 +526,16 @@ const en: Dictionary = {
   'confirm.rollback.body':
     'Files covered by that day’s backup are written back, and the current state is backed up first.',
   'confirm.rollback.ok': 'Roll back',
+  'wipe.card.title': 'Danger zone',
+  'wipe.card.desc':
+    'Deleting everything permanently removes all memory on this machine, along with the skills this plugin approved. It is the only action here that cannot be undone — 「Reset」 above only archives, and can be moved back at any time.',
+  'wipe.button': 'Delete all memory permanently',
+  'confirm.wipe.title': 'Delete all memory permanently?',
+  'confirm.wipe.body':
+    'This permanently deletes everything under the memory folder (memory/, sessions/, journal/, archive/, persona and instructions), plus the skill files this plugin approved into the skills folder. Nothing goes to the recycle bin and it cannot be restored.',
+  'confirm.wipe.hint': 'Type DELETE to confirm',
+  'confirm.wipe.ok': 'Delete permanently',
+  'toast.wiped': 'Permanently deleted',
   'conflict.title': 'This content changed elsewhere',
   'conflict.body': 'Your edit is not lost: keep one version, or cancel and merge by hand.',
   'conflict.keepMine': 'Overwrite with mine',
@@ -507,6 +551,16 @@ const en: Dictionary = {
   'draft.card.title': 'Skills awaiting approval',
   'draft.repeats': 'Repeated {count} times',
   'draft.source': 'From sessions',
+  'draft.view': 'View',
+  'draft.ignore': 'Ignore',
+  'draft.editApprove': 'Edit and approve',
+  'draft.detail.title': 'Skill draft',
+  'draft.detail.target': 'Written to on approval',
+  'draft.detail.sources': 'Source sessions',
+  'draft.detail.whenToUse': 'When to use',
+  'draft.detail.loading': 'Loading the draft…',
+  'draft.detail.gone': 'This draft is gone (it may have just been handled).',
+  'draft.detail.saveHint': 'Edit and approve: your changes are written to that path as-is.',
 
   'doc.persona': 'Persona',
   'doc.instructions': 'Instructions for MemoryBuddy',

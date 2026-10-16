@@ -17,16 +17,20 @@ import {
   ChoiceMenu,
   Confirm,
   DocumentBody,
+  DraftDialog,
   EntryList,
   OptionMenu,
   Row,
   ToastHost,
+  TypedConfirm,
   type LabelledOption,
   type Translate,
 } from './cards.tsx'
 import {
   CONSOLIDATE_MODES,
   TOPICS,
+  WIPE_CONFIRMATION,
+  type DraftDetail,
   type DraftView,
   type EntryView,
   type JournalView,
@@ -51,6 +55,8 @@ export interface MemoryPageProps {
   onConsolidate: () => Promise<{ started: boolean; reason?: string }>
   /** Read one journal day for the history view. */
   onJournal: (date: string) => Promise<JournalView | undefined>
+  /** Read one skill draft in full for the detail dialog (P7 §6.2 B). */
+  onDraft: (name: string) => Promise<DraftDetail | undefined>
   /**
    * Read the runtime's model catalogue, for the picker card's dropdown.
    *
@@ -274,19 +280,25 @@ function ModelPickerCard({
   )
 }
 
-/** The pending-draft cards (§6.2 step 3: approve or discard, one by one). */
+/**
+ * The pending-draft cards (memory-plan §6.2 step 3).
+ *
+ * The card row is deliberately thin — 查看 opens the detail dialog, and the three
+ * decisions the plan requires (批准 / 编辑后批准 / 忽略) live in that dialog, where
+ * the user can actually read what they are approving. A 批准 button that writes a
+ * file into `$DSH_HOME/skills/` without ever showing the file would make the plan's
+ * approval step decorative.
+ */
 function DraftCards({
   t,
   drafts,
   busy,
-  onApprove,
-  onDiscard,
+  onView,
 }: {
   t: Translate
   drafts: DraftView[]
   busy: boolean
-  onApprove: (name: string) => void
-  onDiscard: (name: string) => void
+  onView: (name: string) => void
 }): React.ReactElement {
   return (
     <>
@@ -296,14 +308,9 @@ function DraftCards({
           title={draft.title}
           description={`${t('draft.source')} · ${t('draft.repeats', { count: String(draft.repeats) })}`}
           actions={
-            <>
-              <Button size="sm" variant="primary" disabled={busy} onClick={() => onApprove(draft.name)}>
-                {t('action.approve')}
-              </Button>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => onDiscard(draft.name)}>
-                {t('action.discard')}
-              </Button>
-            </>
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => onView(draft.name)}>
+              {t('draft.view')}
+            </Button>
           }
         >
           <div className={css.note}>{draft.path}</div>
@@ -384,6 +391,7 @@ export function MemoryPage({
   onAction,
   onConsolidate,
   onJournal,
+  onDraft,
   onCatalog,
   heading = true,
   bare = false,
@@ -393,6 +401,7 @@ export function MemoryPage({
     text: '',
   })
   const [resetOpen, setResetOpen] = React.useState(false)
+  const [wipeOpen, setWipeOpen] = React.useState(false)
   const [forget, setForget] = React.useState<{ topic: string; id: string } | undefined>(undefined)
   const [forgetProject, setForgetProject] = React.useState<string | undefined>(undefined)
   const [projectDoc, setProjectDoc] = React.useState<string | undefined>(undefined)
@@ -402,6 +411,13 @@ export function MemoryPage({
   const [rollbackDate, setRollbackDate] = React.useState<string | undefined>(undefined)
   const [journalDate, setJournalDate] = React.useState('')
   const [journal, setJournal] = React.useState<JournalView | undefined>(undefined)
+  // The dialog is open from the click on 查看 until it is closed or the draft is
+  // handled, so BOTH pieces are state: `draftOpen` keeps it mounted (and showing
+  // its loading line) while `draft` carries the content, which arrives a round
+  // trip later.
+  const [draftOpen, setDraftOpen] = React.useState(false)
+  const [draftLoading, setDraftLoading] = React.useState(false)
+  const [draft, setDraft] = React.useState<DraftDetail | undefined>(undefined)
   const fileRef = React.useRef<HTMLInputElement | null>(null)
 
   const say = React.useCallback(
@@ -473,6 +489,22 @@ export function MemoryPage({
     say(ok ? t('toast.resetAll') : t('toast.failed'), ok ? 'success' : 'danger')
   }, [onAction, say, t])
 
+  /**
+   * 彻底删除 (P8).
+   *
+   * The phrase travels in the action and the host re-checks it, so a client that
+   * skipped the dialog would still be refused. On success the memory root is
+   * GONE, which means the snapshot the action returns describes a directory that
+   * no longer exists — the store recreates it on the next `ensure()`, and the
+   * honest thing to show afterwards is the toast, not a stale list of entries
+   * that were just deleted.
+   */
+  const doWipe = React.useCallback(async (): Promise<void> => {
+    setWipeOpen(false)
+    const ok = await onAction({ kind: 'wipe-all', confirm: WIPE_CONFIRMATION })
+    say(ok ? t('toast.wiped') : t('toast.failed'), ok ? 'success' : 'danger')
+  }, [onAction, say, t])
+
   const dismissQuestion = React.useCallback(
     async (index: number): Promise<void> => {
       const ok = await onAction({ kind: 'dismiss-question', index })
@@ -488,6 +520,54 @@ export function MemoryPage({
     },
     [onJournal],
   )
+
+  /** Open the detail dialog and load the draft's full text. */
+  const openDraft = React.useCallback(
+    async (name: string): Promise<void> => {
+      setDraftOpen(true)
+      setDraftLoading(true)
+      setDraft(undefined)
+      const loaded = await onDraft(name)
+      setDraft(loaded)
+      setDraftLoading(false)
+      if (loaded === undefined) say(t('draft.detail.gone'), 'danger')
+    },
+    [onDraft, say, t],
+  )
+
+  const closeDraft = React.useCallback((): void => {
+    setDraftOpen(false)
+    setDraft(undefined)
+  }, [])
+
+  /**
+   * 批准 / 编辑后批准.
+   *
+   * `text` present means the user edited the file in the dialog; it is passed
+   * straight through to the host, which writes exactly those bytes. The dialog is
+   * closed only after the host confirms, so a failed write leaves the text on
+   * screen to retry rather than discarding the user's work.
+   */
+  const approveDraft = React.useCallback(
+    async (text?: string): Promise<void> => {
+      if (draft === undefined) return
+      const ok = await onAction(
+        text === undefined ? { kind: 'approve-draft', name: draft.name } : { kind: 'approve-draft', name: draft.name, text },
+      )
+      say(ok ? t('toast.approved') : t('toast.failed'), ok ? 'success' : 'danger')
+      if (ok) closeDraft()
+    },
+    [closeDraft, draft, onAction, say, t],
+  )
+
+  /** 忽略: the draft is archived, not deleted, and leaves the pending list. */
+  const ignoreDraft = React.useCallback(async (): Promise<void> => {
+    if (draft === undefined) return
+    const name = draft.name
+    const ok = await onAction({ kind: 'ignore-draft', name })
+    say(ok ? t('toast.discarded') : t('toast.failed'), ok ? 'success' : 'danger')
+    if (ok) closeDraft()
+  }, [closeDraft, draft, onAction, say, t])
 
   const doRollback = React.useCallback(async (): Promise<void> => {
     const date = rollbackDate
@@ -595,8 +675,8 @@ export function MemoryPage({
         <Banner
           text={t('draft.banner', { count: String(drafts.length) })}
           action={
-            <Button size="sm" variant="outline" disabled={busy} onClick={() => void consolidate()}>
-              {t('action.consolidate')}
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => void openDraft(drafts[0].name)}>
+              {t('draft.view')}
             </Button>
           }
         />
@@ -926,21 +1006,19 @@ export function MemoryPage({
         </Card>
       )}
 
-      <DraftCards
-        t={t}
-        drafts={drafts}
-        busy={busy}
-        onApprove={name => {
-          void onAction({ kind: 'approve-draft', name }).then(ok =>
-            say(ok ? t('toast.approved') : t('toast.failed'), ok ? 'success' : 'danger'),
-          )
-        }}
-        onDiscard={name => {
-          void onAction({ kind: 'discard-draft', name }).then(ok =>
-            say(ok ? t('toast.discarded') : t('toast.failed'), ok ? 'success' : 'danger'),
-          )
-        }}
-      />
+      <DraftCards t={t} drafts={drafts} busy={busy} onView={name => void openDraft(name)} />
+
+      {draftOpen && (
+        <DraftDialog
+          draft={draft}
+          t={t}
+          loading={draftLoading}
+          busy={busy}
+          onApprove={text => void approveDraft(text)}
+          onIgnore={() => void ignoreDraft()}
+          onClose={closeDraft}
+        />
+      )}
 
       {!bare && (
         <>
@@ -993,6 +1071,29 @@ export function MemoryPage({
           </Card>
         </>
       )}
+
+      {/*
+        危险区 (P8). It is a SEPARATE card at the very bottom rather than another
+        button in 管理记忆: that card's 重置 archives, and putting a permanent
+        delete next to it would make the two look like the same kind of thing.
+        Placed apart, with the irreversibility spelled out, the difference is
+        visible before the click rather than after it.
+      */}
+      <Card
+        title={t('wipe.card.title')}
+        description={t('wipe.card.desc')}
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            className={css.danger}
+            disabled={busy || loading}
+            onClick={() => setWipeOpen(true)}
+          >
+            {t('wipe.button')}
+          </Button>
+        }
+      />
 
       {/*
         The Settings drop reproduces the reference footer exactly: one centred
@@ -1059,6 +1160,21 @@ export function MemoryPage({
         cancelLabel={t('action.cancel')}
         onConfirm={() => void doRollback()}
         onCancel={() => setRollbackDate(undefined)}
+      />
+      {/* The root path is spelled out: the typed phrase is the fence, and the
+          path is what the user is agreeing to remove. */}
+      <TypedConfirm
+        open={wipeOpen}
+        title={t('confirm.wipe.title')}
+        body={t('confirm.wipe.body')}
+        {...(snapshot?.root === undefined ? {} : { detail: snapshot.root })}
+        phrase={WIPE_CONFIRMATION}
+        hint={t('confirm.wipe.hint')}
+        confirmLabel={t('confirm.wipe.ok')}
+        cancelLabel={t('action.cancel')}
+        busy={busy}
+        onConfirm={() => void doWipe()}
+        onCancel={() => setWipeOpen(false)}
       />
 
       <ToastHost

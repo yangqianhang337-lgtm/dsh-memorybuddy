@@ -15,7 +15,7 @@
  * commands, tools — so the test can assert on the wiring as well as the data.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -135,8 +135,8 @@ host.apply(ctx)
 
 record('apply() mounted', true, `inject = ${JSON.stringify(host.inject)}`)
 record(
-  'seven routes registered',
-  routes.size === 7,
+  'eight routes registered',
+  routes.size === 8,
   [...routes.keys()].join(', '),
 )
 record('/memory command registered', commands.some(c => c.name === 'memory'), commands.map(c => c.name).join(', ') || '(none)')
@@ -404,7 +404,6 @@ listeners.get('session/event')?.(target, event('turn/end', 7, { turn: 1, reason:
 listeners.get('session/flush')?.(target)
 await settle()
 
-const { readdirSync, existsSync } = await import('node:fs')
 const sessionsRoot = join(home, 'dsh-memorybuddy/sessions')
 const dayDirs = (existsSync(sessionsRoot) ? readdirSync(sessionsRoot, { withFileTypes: true }) : [])
   .filter(entry => entry.isDirectory())
@@ -585,6 +584,41 @@ if (typeof damaged === 'string' && damaged !== '') {
   )
 }
 
+/* --- P7: the draft detail route ------------------------------------------- */
+
+// A hand-written draft stands in for a generated one: the route's job is to read
+// whatever `skills-draft/<name>/SKILL.md` holds, and verify-skills.mjs already
+// proves the generator writes that file.
+const draftName = 'host-verify-draft'
+mkdirSync(join(home, 'dsh-memorybuddy', 'skills-draft', draftName), { recursive: true })
+writeFileSync(
+  join(home, 'dsh-memorybuddy', 'skills-draft', draftName, 'SKILL.md'),
+  `---\nname: ${draftName}\ntitle: 主机验收草稿\ndescription: 一句话\nwhenToUse: 验收时\nsource: memorybuddy-evolved\nderivedFrom: ["sessions/${journalDay}/a.md", "sessions/${journalDay}/b.md", "sessions/${journalDay}/c.md"]\nrepeats: 3\ncreatedAt: ${new Date().toISOString()}\n---\n# 主机验收草稿\n`,
+  'utf8',
+)
+
+const draftRoute = await call('GET', `/api/memorybuddy/draft?name=${draftName}`, undefined)
+record(
+  'GET /draft answers with the full file text, target path and source sessions',
+  draftRoute.status === 200 &&
+    typeof draftRoute.body?.draft?.text === 'string' &&
+    draftRoute.body.draft.text.includes('主机验收草稿') &&
+    draftRoute.body.draft.body.includes('# 主机验收草稿') &&
+    draftRoute.body.draft.derivedFrom.length === 3 &&
+    typeof draftRoute.body?.draft?.target === 'string' &&
+    draftRoute.body.draft.target.endsWith(join('skills', draftName, 'SKILL.md')),
+  `status ${draftRoute.status}, sources ${draftRoute.body?.draft?.derivedFrom?.length ?? 'n/a'}`,
+)
+record(
+  'the draft route refuses a name that could escape the skills root',
+  (await call('GET', '/api/memorybuddy/draft?name=..%2F..%2Fescape', undefined)).status === 404,
+  '404 for a traversing name',
+)
+record(
+  'a draft that does not exist answers 404 rather than an empty 200',
+  (await call('GET', '/api/memorybuddy/draft?name=no-such-draft', undefined)).status === 404,
+)
+
 /* --- P4-6: reset archives instead of deleting ------------------------------ */
 
 const beforeReset = memoryFile('preferences.md') !== undefined
@@ -604,6 +638,93 @@ record(
   'reset-all left a working skeleton behind',
   memoryFile('memory/index.md') !== undefined && memoryFile('preferences.md') !== undefined,
   'skeleton rebuilt',
+)
+
+/* --- P8-1: 彻底删除 through the live route --------------------------------- */
+
+// Run LAST: it removes the memory root every earlier assertion depends on.
+//
+// The response shape is the point of these two checks. `snapshot()` calls
+// `ensure()`, so a wipe answered with a snapshot would rebuild the skeleton in
+// the same response — the user would be told 「已彻底删除」 while an empty memory
+// directory reappeared behind them. The route therefore answers `wiped: true`
+// with NO snapshot, and the panel reloads instead of adopting one.
+const wrongPhrase = await call('POST', '/api/memorybuddy/action', {
+  action: { kind: 'wipe-all', confirm: 'delete' },
+})
+record(
+  'wipe-all refuses a wrong confirmation phrase and keeps everything',
+  wrongPhrase.status === 500 && existsSync(join(home, 'dsh-memorybuddy', 'memory')),
+  `status ${wrongPhrase.status}, memory still there=${existsSync(join(home, 'dsh-memorybuddy', 'memory'))}`,
+)
+
+const noConfirm = await call('POST', '/api/memorybuddy/action', { action: { kind: 'wipe-all' } })
+record(
+  'wipe-all refuses a missing confirmation field',
+  noConfirm.status === 500 && existsSync(join(home, 'dsh-memorybuddy', 'memory')),
+  `status ${noConfirm.status}`,
+)
+
+// The collector buffers must be dropped BEFORE the delete. A session that was
+// mid-flight at wipe time would otherwise flush itself on its next timer tick
+// and recreate the memory root together with the content the user was just told
+// had been destroyed — so the harness drives a real buffered session through the
+// plugin's own listeners and checks the root stays gone.
+const liveSession = session('sess-live-at-wipe')
+// The toggle-off test above left `conversationMemory: false`, which stops
+// collection for every later section. Switch it back on, or this session never
+// buffers and the "root stays gone" assertion passes for the wrong reason.
+await call('POST', '/api/memorybuddy/preferences', { patch: { conversationMemory: true } })
+await settle(4)
+listeners.get('session/created')?.(liveSession)
+// Deliberately NOT flushed. The realistic hazard is a session whose events are
+// still sitting in the throttle window when the user wipes — an already-flushed
+// note has `dirty === 0`, so a later flush writes nothing and would make the
+// assertion pass even with the route doing nothing.
+listeners.get('session/event')?.(liveSession, event('user/message', 1, userMessage('删除之前说的话')))
+const liveSessionDates = existsSync(join(home, 'dsh-memorybuddy', 'sessions'))
+  ? readdirSync(join(home, 'dsh-memorybuddy', 'sessions'))
+  : []
+const bufferedNote = liveSessionDates.some(date =>
+  readdirSync(join(home, 'dsh-memorybuddy', 'sessions', date)).some(file => file.includes('sess-live-at-wipe')),
+)
+record(
+  'a session has unflushed events buffered before the wipe',
+  bufferedNote === false,
+  `note on disk=${bufferedNote} (must be false: the events are still in the throttle window)`,
+)
+
+const wiped = await call('POST', '/api/memorybuddy/action', {
+  action: { kind: 'wipe-all', confirm: 'DELETE' },
+})
+record(
+  'wipe-all with the exact phrase removes the memory root',
+  wiped.status === 200 && !existsSync(join(home, 'dsh-memorybuddy')),
+  `status ${wiped.status}, root exists=${existsSync(join(home, 'dsh-memorybuddy'))}`,
+)
+record(
+  'the wipe DELETED the root rather than moving it aside',
+  wiped.body?.result?.root === join(home, 'dsh-memorybuddy') &&
+    !existsSync(`${join(home, 'dsh-memorybuddy')}-kept`),
+  `root=${wiped.body?.result?.root}`,
+)
+record(
+  'the wipe response carries NO snapshot, so nothing rebuilds the tree',
+  wiped.body?.wiped === true && wiped.body?.snapshot === undefined,
+  `wiped=${wiped.body?.wiped} snapshot=${wiped.body?.snapshot === undefined ? 'absent' : 'PRESENT'}`,
+)
+
+// Flush the session the way its own timer would, several times over. If the
+// route forgot to drop the buffers, the in-memory state survives the wipe and
+// these calls put the note — and the whole tree — back.
+listeners.get('session/flush')?.(liveSession)
+await settle()
+listeners.get('session/flush')?.(liveSession)
+await settle()
+record(
+  'the wiped root is NOT resurrected by the session that was buffered',
+  !existsSync(join(home, 'dsh-memorybuddy')),
+  `root exists=${existsSync(join(home, 'dsh-memorybuddy'))}`,
 )
 
 /* --- report ---------------------------------------------------------------- */
