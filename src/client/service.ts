@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { MemoryApi, MemoryApiError } from './transport'
-import type { JournalView, MemorySnapshot, PreferencesView } from '../protocol'
+import type { ConsolidateStatus, JournalView, MemorySnapshot, ModelCatalog, PreferencesView } from '../protocol'
 
 /** What the panel needs to render, in one immutable value. */
 export interface MemoryView {
@@ -55,6 +55,14 @@ export interface MemoryFace {
   onConsolidate: () => Promise<{ started: boolean; reason?: string }>
   /** Read one journal day, for the history view. */
   onJournal: (date: string) => Promise<JournalView | undefined>
+  /**
+   * The runtime's model catalogue, for the picker's dropdown.
+   *
+   * It is a separate call because the enumeration is the one piece of panel data
+   * that may cost a network round trip, and it is only needed once the user opens
+   * the card.
+   */
+  onCatalog: () => Promise<ModelCatalog | undefined>
 }
 
 const EMPTY: MemoryView = {
@@ -96,9 +104,10 @@ export class MemoryController {
     }
   }
 
-  private set(patch: Partial<MemoryView>): void {
+  private set(patch: Partial<MemoryView> | ((current: MemoryView) => Partial<MemoryView>)): void {
     if (this.disposed) return
-    this.view = { ...this.view, ...patch }
+    const next = typeof patch === 'function' ? patch(this.view) : patch
+    this.view = { ...this.view, ...next }
     for (const listener of [...this.listeners]) {
       try {
         listener()
@@ -228,16 +237,54 @@ export class MemoryController {
     return { started: true }
   }
 
-  /** Re-read the snapshot until the pass stops changing it, or give up. */
+  /**
+   * Re-read the snapshot until the pass stops changing it, or give up.
+   *
+   * The poll hits `GET /consolidate-status`, not `/state`: the full snapshot
+   * re-reads every document and recomputes a sha1 revision, which is far too
+   * much to repeat every two seconds while a model call is in flight. The light
+   * answer carries the consolidation block, the question list and the revision —
+   * everything the panel re-renders on — and a terminal tick does one full
+   * `load()` so the returned revision is the final one.
+   *
+   * Rounds are bounded rather than time-bounded because a bounded loop cannot
+   * leak a timer if a tick throws: each round awaits, and the timer is only
+   * re-armed after the await settles.
+   */
   private armPoll(): void {
     if (this.pollTimer !== undefined) globalThis.clearTimeout(this.pollTimer)
     let rounds = 0
     const tick = async (): Promise<void> => {
       if (this.disposed) return
       rounds += 1
-      await this.load()
-      if (this.disposed || rounds >= 6) {
+      let status: ConsolidateStatus | undefined
+      try {
+        status = await this.api.consolidateStatus()
+      } catch {
+        // A failed poll tick is not a page error: the pass is still running on
+        // the host, and the next tick will see it.
+      }
+      if (this.disposed) return
+      if (status !== undefined) {
+        this.set(current => ({
+          ...current,
+          busy: status.running,
+          snapshot:
+            current.snapshot === undefined
+              ? current.snapshot
+              : {
+                  ...current.snapshot,
+                  revision: status.revision,
+                  consolidation: status.consolidation,
+                  questions: status.questions,
+                  history: status.history,
+                  sessions: { ...current.snapshot.sessions, pending: status.pending },
+                },
+        }))
+      }
+      if (this.disposed || rounds >= 12) {
         this.pollTimer = undefined
+        await this.load()
         return
       }
       this.pollTimer = globalThis.setTimeout(() => void tick(), 2_000)
@@ -249,6 +296,22 @@ export class MemoryController {
   async journal(date: string): Promise<JournalView | undefined> {
     try {
       return await this.api.journal(date)
+    } catch (error) {
+      this.set({ error: this.describe(error, 'load') })
+      return undefined
+    }
+  }
+
+  /**
+   * Read the model catalogue.
+   *
+   * It deliberately does NOT set `busy`: opening a dropdown must not disable the
+   * whole page's buttons, and a failed enumeration is a note on the card rather
+   * than a page-level error.
+   */
+  async catalog(): Promise<ModelCatalog | undefined> {
+    try {
+      return await this.api.models()
     } catch (error) {
       this.set({ error: this.describe(error, 'load') })
       return undefined

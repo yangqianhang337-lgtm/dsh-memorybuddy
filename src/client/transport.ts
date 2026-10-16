@@ -12,10 +12,12 @@
 
 import { API_PREFIX } from '../protocol'
 import type {
+  ConsolidateStatus,
   DocumentView,
   EntryView,
   JournalView,
   MemorySnapshot,
+  ModelCatalog,
   SessionNoteView,
   DraftView,
   PreferencesPatch,
@@ -177,15 +179,58 @@ export class MemoryApi {
     }
     return { date: record.date, text: record.text ?? '', backups: record.backups ?? [] }
   }
+
+  /**
+   * The runtime's model catalogue, for the picker's dropdown.
+   *
+   * The host caches the enumeration (a `listModels` call may hit the network), so
+   * opening the card twice is cheap — but this is still NOT a per-render call.
+   */
+  async models(): Promise<ModelCatalog> {
+    const value = (await request(`${CLIENT_PREFIX}/models`, { cache: 'no-store' })) as {
+      catalog?: unknown
+    }
+    const catalog = value?.catalog as ModelCatalog | undefined
+    if (catalog === undefined || !Array.isArray(catalog.models)) {
+      throw new MemoryApiError('body', 'malformed-catalog')
+    }
+    return catalog
+  }
+
+  /**
+   * A light status poll while a pass runs.
+   *
+   * It exists because the full snapshot re-reads every document and recomputes a
+   * sha1 revision — far too much to repeat every couple of seconds. The answer
+   * is the subset the panel actually changes on.
+   */
+  async consolidateStatus(): Promise<ConsolidateStatus> {
+    const value = (await request(`${CLIENT_PREFIX}/consolidate-status`, { cache: 'no-store' })) as
+      | Partial<ConsolidateStatus>
+      | undefined
+    if (value === undefined || typeof value.revision !== 'string') {
+      throw new MemoryApiError('body', 'malformed-status')
+    }
+    return {
+      running: value.running === true,
+      revision: value.revision,
+      consolidation: value.consolidation ?? { lastAt: null, reason: '', modelStage: 'disabled', modelNote: '' },
+      questions: value.questions ?? [],
+      history: value.history ?? [],
+      pending: typeof value.pending === 'number' ? value.pending : 0,
+    }
+  }
 }
 
 /** Convenience re-exports so the card components import one module. */
 export type {
+  ConsolidateStatus,
   DocumentView,
   DraftView,
   EntryView,
   JournalView,
   MemorySnapshot,
+  ModelCatalog,
   PreferencesView,
   SessionNoteView,
   SaveResult,

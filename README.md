@@ -13,8 +13,11 @@
 > `$DSH_HOME/dsh-memorybuddy/`. It ships one first-level sidebar panel and two native
 > settings pages, injects a compact memory section into every turn's system prompt, and
 > exposes three agent tools (`memorybuddy_recall`, `memorybuddy_remember`, `memorybuddy_forget`)
-> plus a `/memory` command. First release (0.1.0) covers the skeleton, the storage layer,
-> the panel UI, and session collection; memory distillation by a model is **not** enabled yet.
+> plus a `/memory` command. Consolidation is closed-loop: scheduled triggers, a question
+> card, journal history with rollback, and (since 0.4.0) model distillation — the user may
+> pick the model, otherwise a free-first candidate chain is tried, both behind an
+> allowlist and cooldown table; only candidate/profile summaries are ever sent to a model,
+> never raw dialogue.
 
 ---
 
@@ -74,6 +77,10 @@
   每条一个「知道了」。问题存在 `state.json` 里，重启后仍在。
 - **整理历史**：按日期列出每次整理的日志正文与当天备份的文件清单，`回滚到这一天` 把备份还原回去；
   回滚前会先把**当前**状态再备份一次，所以回滚本身也能回滚。
+- **提炼模型**：整理的最后一步可以交给模型做「提炼」（只发候选摘要与画像摘要，**绝不发原始对话**）。
+  不选就是「自动（免费优先）」：按 用户自选 → 免费档 → 已配置的第三方 → 会话默认 → 任意可用 的顺序
+  逐个尝试；选了某个模型就优先用它，失败自动回退到这条链。失败按类别写冷却表，同一模型不会被连撞两次；
+  `modelAllowlist` 非空时是**硬边界**，自选模型也受它约束。整轮限 60 秒预算、最多试 2 个候选。
 - 页面顶部显示上次 / 下次整理时间与触发条件，底部是隐私说明与「复制记忆目录路径」。
 
 ### 三个 agent 工具 + 一个命令
@@ -185,8 +192,11 @@ state.json                采集水位线、待整理队列、待确认问题、
 | `consolidateIdleMinutes` | `10` | 空闲多久算空闲 |
 | `consolidateFixedTime` | `03:00` | 固定整理时间（`consolidateOn: fixed` 时才用） |
 | `consolidateQuiet` | `true` | 整理是否静默 |
-| `modelPolicy` | `free-first` | 模型选择策略 |
-| `modelAllowlist` | `[]` | 允许的模型 |
+| `modelPolicy` | `free-first` | 模型选择策略：`free-first` / `choice` / `session-default` / `allowlist` / `off`（`off` = 不做模型提炼） |
+| `modelAllowlist` | `[]` | 允许的模型；**非空时是硬边界**，自选模型也受它约束 |
+| `modelChoiceProvider` | `""` | 自选模型的 provider；空 = 不指定，走候选链 |
+| `modelChoiceModel` | `""` | 自选模型的 model id；与上一项同时为空才算未指定 |
+| `modelChoiceEffort` | `""` | 自选模型的思考档位；必须是该模型 `reasoning.efforts` 里的值，空 = 用模型默认 |
 | `promptBudgetBytes` | `4096` | 注入系统提示的记忆预算（字节） |
 
 注入进每轮系统提示的内容有明确预算：人设 800 B、用户指令 800 B、长期记忆 4096 B（可配）、本项目记忆 1200 B；
@@ -205,8 +215,10 @@ state.json                采集水位线、待整理队列、待确认问题、
 - **只采集你真说过的话**：`user/message` 里来自运行时上下文、其它插件、子 agent 的消息都不会进记忆。
 - **HTTP 路由只对本机开放**：`/api/memorybuddy/*` 要求同源标记，并同时校验回环地址或 DSH 外壳注入的会话 cookie；
   这是一个绊线（tripwire）而非身份认证——它挡住的是从页面脚本或其它进程发起的越权调用。
-- **首版不做模型提炼**：面板会如实显示「模型提炼未启用（首版）」。整理只做确定性工作（扫描、去重、重建索引），
-  不会把你的记忆内容发给任何模型。
+- **模型提炼只发摘要**：模型阶段见到的只有候选条目摘要与现有画像摘要（单次输入上限 16 KB），
+  **绝不发送原始对话**；模型返回的是 JSON diff，经逐字锚点校验后才可能改写条目，`pinned` 条目永不被改。
+  `modelPolicy: 'off'` 时完全不发起任何模型调用。失败按类别写冷却表（额度 6h / 模型不存在或认证失败 24h / 网络 30min），
+  面板如实显示「上次整理用了 <模型>，<N> token」或「未执行：<原因>」。
 
 ---
 
@@ -248,7 +260,13 @@ Remove-Item "$env:DSH_HOME\dsh-memorybuddy" -Recurse -Force
 待确认问题、整理历史与一键回滚进入面板；「重置」改为把全部记忆归档到 `archive/reset-<时间戳>/`。
 详见下方「整理什么时候跑」。
 
-**尚未实现**：模型提炼（含用户自选模型）、技能草稿的自动生成、跨设备同步。
+**0.4.0 — P5 模型提炼**：整理的最后一步接上模型阶段（用户自选 → 免费优先 → 第三方 → 会话默认 → 任意可用，
+失败按类别冷却、自动回退，白名单是硬边界，`off` 压过一切）。
+新增「提炼模型」面板卡片（真实枚举 + 校验 + 思考档位 + 改回自动 + 加入白名单）与
+`GET /api/memorybuddy/models`、`GET /api/memorybuddy/consolidate-status` 两条路由。
+隐私底线不变：只发候选与画像摘要，绝不发原始对话。
+
+**尚未实现**：项目级记忆的自动积累（P6）、技能草稿的自动生成（P7）、跨设备同步。
 
 ---
 

@@ -55,6 +55,25 @@ export interface Dictionary {
   'memory.never': string
   'memory.pending': string
   'memory.modelStage': string
+  'memory.modelPick': string
+  'memory.modelPickHint': string
+  'memory.modelPickAuto': string
+  'memory.modelPickValue': string
+  'memory.modelPickFree': string
+  'memory.modelPickEffort': string
+  'memory.modelPickOk': string
+  'memory.modelPickBad': string
+  'memory.modelPickBlocked': string
+  'memory.modelPickCooling': string
+  'memory.modelPickOff': string
+  'memory.modelPickAllow': string
+  'memory.modelPickReset': string
+  'memory.modelPickEmpty': string
+  'memory.modelPickNote': string
+  'memory.modelRun': string
+  'memory.modelRunTokens': string
+  'memory.modelRunFallback': string
+  'memory.modelRunSkipped': string
   'memory.questions': string
   'memory.questionsHint': string
   'memory.history': string
@@ -196,6 +215,25 @@ const zh: Dictionary = {
   'memory.never': '（还没有整理过）',
   'memory.pending': '{count} 个会话待整理',
   'memory.modelStage': '模型提炼未启用（首版）',
+  'memory.modelPick': '提炼模型',
+  'memory.modelPickHint': '留空则按「免费优先」自动挑选；选了就优先用它，失败时自动回退。',
+  'memory.modelPickAuto': '自动（免费优先）',
+  'memory.modelPickValue': '{provider} / {model}',
+  'memory.modelPickFree': '· 免费',
+  'memory.modelPickEffort': '思考档位',
+  'memory.modelPickOk': '可用 · 上下文 {context}',
+  'memory.modelPickBad': '当前不可用（{reason}），整理时会自动回退到候选链',
+  'memory.modelPickBlocked': '你选的模型不在白名单里',
+  'memory.modelPickCooling': '这个模型正在冷却（剩 {minutes} 分钟），整理时会跳过它',
+  'memory.modelPickOff': '已关闭模型提炼',
+  'memory.modelPickAllow': '加入白名单',
+  'memory.modelPickReset': '改回自动',
+  'memory.modelPickEmpty': '当前环境没有可用的模型服务。',
+  'memory.modelPickNote': '免费标记仅供参考（按 provider 配对匹配）',
+  'memory.modelRun': '上次整理用了 {model}',
+  'memory.modelRunTokens': ' · {tokens} token',
+  'memory.modelRunFallback': ' · 已从 {from} 回退',
+  'memory.modelRunSkipped': '未执行：{reason}',
   'memory.questions': '待你确认',
   'memory.questionsHint': '整理时发现这几处互相矛盾或久未更新，处理完请点「知道了」。',
   'memory.history': '整理历史',
@@ -333,6 +371,25 @@ const en: Dictionary = {
   'memory.never': '(never run yet)',
   'memory.pending': '{count} sessions waiting',
   'memory.modelStage': 'Model distillation is off (first release)',
+  'memory.modelPick': 'Distillation model',
+  'memory.modelPickHint': 'Leave it empty to pick automatically (free first); a choice is tried first and falls back on failure.',
+  'memory.modelPickAuto': 'Automatic (free first)',
+  'memory.modelPickValue': '{provider} / {model}',
+  'memory.modelPickFree': '· free',
+  'memory.modelPickEffort': 'Reasoning effort',
+  'memory.modelPickOk': 'Available · context {context}',
+  'memory.modelPickBad': 'Not available right now ({reason}); a pass will fall back to the chain',
+  'memory.modelPickBlocked': 'Your choice is not in the allowlist',
+  'memory.modelPickCooling': 'This model is cooling down ({minutes} min left); a pass will skip it',
+  'memory.modelPickOff': 'Model distillation is off',
+  'memory.modelPickAllow': 'Add to allowlist',
+  'memory.modelPickReset': 'Back to automatic',
+  'memory.modelPickEmpty': 'No model service is available in this environment.',
+  'memory.modelPickNote': 'The free tag is advisory (matched per provider)',
+  'memory.modelRun': 'Last pass used {model}',
+  'memory.modelRunTokens': ' · {tokens} tokens',
+  'memory.modelRunFallback': ' · fell back from {from}',
+  'memory.modelRunSkipped': 'Not run: {reason}',
   'memory.questions': 'Waiting for your answer',
   'memory.questionsHint': 'A pass found these contradictory or stale; dismiss each one once you have handled it.',
   'memory.history': 'Consolidation history',

@@ -444,7 +444,7 @@ export function TextField({
 }
 
 /* ------------------------------------------------------------------ *
- * Select-shaped menu (no Select primitive exists)
+ * Select-shaped menus (no Select primitive exists)
  * ------------------------------------------------------------------ */
 
 export interface ChoiceMenuProps {
@@ -495,6 +495,67 @@ export function ChoiceMenu({
           onClick={() => setOpen(current => !current)}
         >
           {value}
+        </Button>
+      }
+    />
+  )
+}
+
+export interface LabelledOption {
+  id: string
+  label: string
+}
+
+/**
+ * The same shape, for choices whose id and label differ.
+ *
+ * The model picker needs this: an entry's id is its `provider/model` route
+ * (which is what the host stores), while its label carries the human name, the
+ * route and the free tag. Collapsing the two into one string would mean the
+ * host re-parsing a display label.
+ */
+export function OptionMenu({
+  value,
+  options,
+  placeholder,
+  disabled = false,
+  ariaLabel,
+  onSelect,
+}: {
+  value: string
+  options: readonly LabelledOption[]
+  placeholder: string
+  disabled?: boolean
+  ariaLabel: string
+  onSelect: (next: string) => void
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(false)
+  const current = options.find(option => option.id === value)
+  const label = current === undefined ? placeholder : current.label
+
+  return (
+    <Menu
+      open={open}
+      align="end"
+      selectedId={value}
+      items={options.map(option => ({ id: option.id, label: option.label }))}
+      onSelect={next => {
+        setOpen(false)
+        if (next !== value) onSelect(next)
+      }}
+      onClose={() => setOpen(false)}
+      anchor={
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          aria-label={ariaLabel}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          icon={<IconChevronDownOutlineMedium size={14} />}
+          onClick={() => setOpen(current => !current)}
+        >
+          {label}
         </Button>
       }
     />

@@ -135,8 +135,8 @@ host.apply(ctx)
 
 record('apply() mounted', true, `inject = ${JSON.stringify(host.inject)}`)
 record(
-  'five routes registered',
-  routes.size === 5,
+  'seven routes registered',
+  routes.size === 7,
   [...routes.keys()].join(', '),
 )
 record('/memory command registered', commands.some(c => c.name === 'memory'), commands.map(c => c.name).join(', ') || '(none)')

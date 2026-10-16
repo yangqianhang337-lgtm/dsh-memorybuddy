@@ -17,9 +17,123 @@ export type ReplyStyle = (typeof REPLY_STYLES)[number]
 export const CONSOLIDATE_MODES = ['startup-idle', 'idle', 'session-end', 'fixed'] as const
 export type ConsolidateMode = (typeof CONSOLIDATE_MODES)[number]
 
-/** Model policy for the (not yet enabled) model stage. */
+/** Model policy for the model stage. `off` beats the user's own model choice. */
 export const MODEL_POLICIES = ['free-first', 'allowlist', 'session-default', 'off'] as const
 export type ModelPolicy = (typeof MODEL_POLICIES)[number]
+
+/** How a model call failed, which decides its cooldown window. */
+export const FAILURE_KINDS = ['quota', 'missing', 'auth', 'network', 'unknown'] as const
+export type FailureKind = (typeof FAILURE_KINDS)[number]
+
+/** One selectable model, as the picker renders it. */
+export interface ModelOption {
+  provider: string
+  id: string
+  name: string
+  /** Free-tier tag, matched on the `(provider, id)` pair — never the bare id. */
+  free: boolean
+  /**
+   * Context window, when the runtime advertised one.
+   *
+   * The listing only reports what the adapter publishes; `resolveModelInfo`
+   * remains the authority, and this is absent for every adapter that does not
+   * put `contextWindow` on its `LlmDiscoveredModel` entries.
+   */
+  contextWindow?: number
+}
+
+/** The enumerated catalogue the picker draws from. */
+export interface ModelCatalog {
+  providers: { id: string; name: string }[]
+  models: ModelOption[]
+  /** When the host last refreshed this list, for the cache caption. */
+  fetchedAt: string
+  /** Why the list is empty, when it is (`llm` service absent, discovery failed). */
+  note?: string
+}
+
+/** How much text the model stage may send in one call (memory-plan §6.1.2). */
+export const MAX_INPUT_BYTES = 16 * 1024
+
+/** One operation of the model's diff. It proposes; the host disposes. */
+export type DistillOperation =
+  | { op: 'add'; topic: TopicKey; text: string }
+  | { op: 'update'; id: string; anchor: string; text: string }
+
+/** An operation that passed the verbatim-anchor check. */
+export interface DistillProposal {
+  op: 'add' | 'update'
+  /** The entry being revised, for `update`. */
+  id?: string
+  anchor?: string
+  topic: TopicKey
+  text: string
+}
+
+/** What the last model-stage attempt did, for the panel's status line. */
+export interface ModelRunView {
+  /** `provider/model` that actually produced the diff, when one did. */
+  used?: string
+  tokens?: number
+  /** How many of the model's operations the host actually applied. */
+  applied?: number
+  /** Operations the host refused, and why (a bad anchor, a pinned entry). */
+  rejected?: string[]
+  /** Routes that were tried and failed, for the journal. */
+  failures?: string[]
+  /** Set when the user's chosen model failed and the chain took over. */
+  fellBackFrom?: string
+  /** Set when the model stage did not run at all. */
+  skippedReason?: string
+  at?: string
+}
+
+/** The live state of the user's own model pick, for the picker card (§4.4). */
+export interface ModelChoiceStatus {
+  provider: string
+  model: string
+  /** Empty means "not chosen". */
+  chosen: boolean
+  /** `resolveModelInfo` said this route resolves right now. */
+  ok: boolean
+  /** Why it does not, in the panel's words. */
+  reason?: string
+  /** The route's `reasoning.efforts`, so the effort menu cannot invent one. */
+  efforts: string[]
+  defaultEffort?: string
+  contextWindow?: number
+  /** True when `modelAllowlist` refuses the user's own pick (§4.4 rule 5). */
+  blockedByAllowlist: boolean
+  /** True when the route is inside its cooldown window. */
+  cooling: boolean
+  /** True when `modelPolicy: 'off'` beats the pick (§4.4 rule 6). */
+  disabled: boolean
+}
+
+/** A cooling-down route, surfaced so the panel can explain a skip. */
+export interface CooldownView {
+  route: string
+  kind: FailureKind
+  until: string
+  minutes: number
+}
+
+/**
+ * Live facts about the runtime that `state.json` cannot hold.
+ *
+ * They are computed per request by the routes and merged into the snapshot, so
+ * the panel can show "整理中" and the picker's validation without either value
+ * ever being persisted (a stale `running: true` on disk would be a lie after a
+ * crash).
+ */
+export interface RuntimeView {
+  /** True while a consolidation pass is in flight. */
+  running: boolean
+  /** The user's model pick, resolved against the live registry. */
+  modelChoice?: ModelChoiceStatus
+  /** The enumerated catalogue, when the panel asked for it. */
+  catalog?: ModelCatalog
+}
 
 /** Confidence ladder of one memory entry. */
 export const CONFIDENCES = ['低', '中', '高'] as const
@@ -99,10 +213,19 @@ export interface MemorySnapshot {
   consolidation: {
     lastAt: string | null
     reason: string
-    /** Which stage the last pass reached. The model stage lands in P5. */
+    /** Which stage the last pass reached. */
     modelStage: 'disabled' | 'deterministic' | 'model'
     modelNote: string
+    /** What the model stage did last time (§4.4), read back from `state.json`. */
+    model?: ModelRunView
   }
+  /**
+   * Live runtime facts, merged in by the routes on every request.
+   *
+   * They are deliberately NOT part of the stored snapshot: `running` would be
+   * a lie after a crash, and the catalogue is a network-backed cache.
+   */
+  runtime?: RuntimeView
   /** Unanswered questions a pass raised (conflicts, stale 高 entries). */
   questions: string[]
   /** Journal dates that have a backup, newest first — the rollback menu. */
@@ -121,6 +244,22 @@ export interface JournalView {
   backups: string[]
 }
 
+/**
+ * The light answer to `GET /consolidate-status`.
+ *
+ * The panel polls this while a pass runs. It is deliberately a SUBSET of
+ * `MemorySnapshot`: the full snapshot re-reads every document and recomputes a
+ * sha1 revision, which is far too much work to repeat every two seconds.
+ */
+export interface ConsolidateStatus {
+  running: boolean
+  revision: string
+  consolidation: MemorySnapshot['consolidation']
+  questions: string[]
+  history: string[]
+  pending: number
+}
+
 /** Preference fields, exactly the front-matter keys of `preferences.md`. */
 export interface PreferencesView {
   userName: string
@@ -137,6 +276,11 @@ export interface PreferencesView {
   consolidateQuiet: boolean
   modelPolicy: ModelPolicy
   modelAllowlist: string[]
+  /** The user's own model pick, which outranks the candidate chain (§4.4). */
+  modelChoiceProvider: string
+  modelChoiceModel: string
+  /** Must be one of that model's `reasoning.efforts`; empty means "model default". */
+  modelChoiceEffort: string
   promptBudgetBytes: number
 }
 

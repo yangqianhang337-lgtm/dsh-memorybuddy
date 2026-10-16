@@ -58,6 +58,7 @@ import {
   type JournalView,
   type MemorySnapshot,
   type ModelPolicy,
+  type ModelRunView,
   type PreferencesPatch,
   type PreferencesView,
   type ReplyStyle,
@@ -83,6 +84,14 @@ export interface PluginState {
    * to surface them: a conflict the user never sees is a conflict never fixed.
    */
   questions: string[]
+  /**
+   * What the model stage did in the last pass, for the panel's status line.
+   *
+   * It is persisted rather than kept in memory so a restart does not lose the
+   * only record of which model ran — the journal has the long form, this has
+   * the line the card shows.
+   */
+  lastModelRun?: ModelRunView
 }
 
 const EMPTY_STATE: PluginState = {
@@ -93,6 +102,42 @@ const EMPTY_STATE: PluginState = {
   modelCooldown: {},
   confidence: {},
   questions: [],
+}
+
+/** Coerce one parsed `state.json` object, tolerating every missing field. */
+function stateFrom(parsed: Partial<PluginState>): PluginState {
+  const state: PluginState = {
+    schema: typeof parsed.schema === 'number' ? parsed.schema : 1,
+    processed: parsed.processed ?? {},
+    pending: Array.isArray(parsed.pending) ? parsed.pending : [],
+    lastConsolidateAt: parsed.lastConsolidateAt ?? null,
+    modelCooldown: parsed.modelCooldown ?? {},
+    confidence: parsed.confidence ?? {},
+    questions: Array.isArray(parsed.questions) ? parsed.questions.filter(item => typeof item === 'string') : [],
+  }
+  if (parsed.lastModelRun !== undefined && parsed.lastModelRun !== null) state.lastModelRun = parsed.lastModelRun
+  return state
+}
+
+/**
+ * The panel's one-line account of the last model stage.
+ *
+ * It has to distinguish four states that all look alike from the outside: never
+ * consolidated, consolidated deterministically with the model stage off,
+ * consolidated with the model stage failing, and consolidated with the model
+ * stage contributing. Saying "模型提炼未启用" in all four would be a lie in three
+ * of them.
+ */
+function modelNote(state: PluginState): string {
+  if (state.lastConsolidateAt === null) return '还没有整理过'
+  const run = state.lastModelRun
+  if (run === undefined) return '确定性整理已启用；模型提炼未启用'
+  if (run.skippedReason !== undefined) return `上次模型提炼未执行：${run.skippedReason}`
+  if (run.used === undefined) return '确定性整理已启用；模型提炼未执行'
+  const applied = run.applied ?? 0
+  const tokens = run.tokens !== undefined && run.tokens > 0 ? `，${run.tokens} token` : ''
+  const fell = run.fellBackFrom === undefined ? '' : `（自选模型 ${run.fellBackFrom} 失败，已回退）`
+  return `上次整理用了 ${run.used}${tokens}，应用 ${applied} 条${fell}`
 }
 
 /** Secrets the blacklist drops outright (memory-plan §5.2). */
@@ -176,15 +221,7 @@ export class MemoryStore {
     if (raw === undefined || raw.trim() === '') return { ...EMPTY_STATE }
     try {
       const parsed = JSON.parse(raw) as Partial<PluginState>
-      return {
-        schema: typeof parsed.schema === 'number' ? parsed.schema : 1,
-        processed: parsed.processed ?? {},
-        pending: Array.isArray(parsed.pending) ? parsed.pending : [],
-        lastConsolidateAt: parsed.lastConsolidateAt ?? null,
-        modelCooldown: parsed.modelCooldown ?? {},
-        confidence: parsed.confidence ?? {},
-        questions: Array.isArray(parsed.questions) ? parsed.questions.filter(item => typeof item === 'string') : [],
-      }
+      return stateFrom(parsed)
     } catch {
       // A corrupt state file must not take the plugin down: the watermark is
       // rebuildable (the worst case is one redundant consolidation pass).
@@ -225,16 +262,7 @@ export class MemoryStore {
       let current: PluginState = { ...EMPTY_STATE }
       if (raw !== undefined && raw.trim() !== '') {
         try {
-          const parsed = JSON.parse(raw) as Partial<PluginState>
-          current = {
-            schema: typeof parsed.schema === 'number' ? parsed.schema : 1,
-            processed: parsed.processed ?? {},
-            pending: Array.isArray(parsed.pending) ? parsed.pending : [],
-            lastConsolidateAt: parsed.lastConsolidateAt ?? null,
-            modelCooldown: parsed.modelCooldown ?? {},
-            confidence: parsed.confidence ?? {},
-            questions: Array.isArray(parsed.questions) ? parsed.questions.filter(item => typeof item === 'string') : [],
-          }
+          current = stateFrom(JSON.parse(raw) as Partial<PluginState>)
         } catch {
           this.warnings.push('state.json 无法解析，已按空状态继续（记忆文件未受影响）。')
         }
@@ -274,6 +302,9 @@ export class MemoryStore {
       consolidateQuiet: frontBooleanOr(front, 'consolidateQuiet', DEFAULT_PREFERENCES.consolidateQuiet),
       modelPolicy: (MODEL_POLICIES as readonly string[]).includes(policy) ? (policy as ModelPolicy) : DEFAULT_PREFERENCES.modelPolicy,
       modelAllowlist: frontList(front, 'modelAllowlist'),
+      modelChoiceProvider: frontString(front, 'modelChoiceProvider', DEFAULT_PREFERENCES.modelChoiceProvider),
+      modelChoiceModel: frontString(front, 'modelChoiceModel', DEFAULT_PREFERENCES.modelChoiceModel),
+      modelChoiceEffort: frontString(front, 'modelChoiceEffort', DEFAULT_PREFERENCES.modelChoiceEffort),
       promptBudgetBytes: frontNumber(front, 'promptBudgetBytes', DEFAULT_PREFERENCES.promptBudgetBytes),
     }
   }
@@ -693,13 +724,18 @@ export class MemoryStore {
       consolidation: {
         lastAt: state.lastConsolidateAt,
         reason: await this.consolidationReason(preferences),
-        // The deterministic stage is what actually runs today; the model stage
-        // upgrades this to `'model'` once P5 lands, and `modelNote` says which.
-        modelStage: state.lastConsolidateAt === null ? 'disabled' : 'deterministic',
-        modelNote:
+        // The stage the LAST pass reached. A pass that ran the model stage and
+        // applied at least one operation is `'model'`; one that ran the model
+        // stage and fell back to deterministic-only is still `'deterministic'`,
+        // which is the honest reading of what the memory files reflect.
+        modelStage:
           state.lastConsolidateAt === null
-            ? '还没有整理过（模型提炼未启用）'
-            : '确定性整理已启用；模型提炼未启用',
+            ? 'disabled'
+            : state.lastModelRun?.used !== undefined && (state.lastModelRun.applied ?? 0) > 0
+              ? 'model'
+              : 'deterministic',
+        modelNote: modelNote(state),
+        ...(state.lastModelRun === undefined ? {} : { model: state.lastModelRun }),
       },
       questions: [...state.questions],
       history: await this.readHistory(),

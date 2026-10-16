@@ -95,7 +95,16 @@ const PANEL_CSS = [
   '.mbJournalBody{max-height:280px;overflow-y:auto;padding:8px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary)}',
 
   '.mbFooter{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
-  /* Reference footer: one centred muted line with 隐私政策 as an inline link. */
+
+  /* The model picker card (§4.4): a select-shaped menu plus its live verdict. */
+  '.mbPick{display:flex;flex-direction:column;gap:8px}',
+  '.mbPickRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+  '.mbPickValue{color:var(--dsw-alias-label-secondary);font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;word-break:break-all}',
+  '.mbPickOk{color:var(--dsw-alias-state-success-primary,var(--dsw-alias-label-secondary));font-size:12px;line-height:18px}',
+  '.mbPickBad{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px}',
+  '.mbPickWarn{color:var(--dsw-alias-state-warn-primary);font-size:12px;line-height:18px}',
+  /* `off` greys the whole card: the switch above it is the thing to change. */
+  '.mbPickOff{opacity:.55;pointer-events:none}',
   '.mbFooterCenter{display:block;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
   '.mbFooterLink{padding:0;border:0;background:none;color:inherit;font:inherit;text-decoration:underline;cursor:pointer}',
   '.mbFooterLink:hover{color:var(--dsw-alias-label-secondary)}',
@@ -151,6 +160,13 @@ export const panelCss = {
   draft: 'mbDraft',
   draftBody: 'mbDraftBody',
   journalBody: 'mbJournalBody',
+  pick: 'mbPick',
+  pickRow: 'mbPickRow',
+  pickValue: 'mbPickValue',
+  pickOk: 'mbPickOk',
+  pickBad: 'mbPickBad',
+  pickWarn: 'mbPickWarn',
+  pickOff: 'mbPickOff',
   footer: 'mbFooter',
   footerCenter: 'mbFooterCenter',
   footerLink: 'mbFooterLink',

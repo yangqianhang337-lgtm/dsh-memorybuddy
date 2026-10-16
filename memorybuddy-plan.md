@@ -1,12 +1,18 @@
 # MemoryBuddy 后续开发计划（memorybuddy-plan.md）
 
-> 状态：**P4 已交付（0.3.0）**，P5–P8 待你过目确认（确认前不改代码）
+> 状态：**P5 已交付（0.4.0）**，P6–P8 待你过目确认（确认前不改代码）
 > 前置：`memory-plan.md` 的 **P0–P3 已交付**（0.1.0），项目已于 2026-10-16 更名为 **memorybuddy**（0.2.0，见 `update-plan.md`）。
 > 本文用途：把 `memory-plan.md` §9.2 的 P4–P8 路线图**按代码实况重新切分**，作为 P3 之后开发的唯一参照。
 > 与旧计划的关系：**本文覆盖并取代 `memory-plan.md` §9.2**；§9.1（P0–P3）已完成，仅作历史记录。
 >
-> **进度**：§3（P4 自动整合闭环）已于 0.3.0 交付，验收 49/49 + 14/14 + 真机实测通过；
-> 下一阶段是 §4（P5 模型提炼），其前置任务 §4.3 已随 P4 一并完成。
+> **进度**：§3（P4 自动整合闭环）已于 0.3.0 交付；§4（P5 模型提炼）已于 0.4.0 交付，
+> 验收 30/30 + 全套回归绿 + 真机实测（真实模型调用成功、冷却/回退/白名单均验证）通过；
+> 下一阶段是 §5（P6 项目级记忆）。
+>
+> **P5 实测要点**（详见 §4.8 结果列与 CHANGELOG 0.4.0）：`prepareCall` 句柄必须用**解析后配置**分发
+> （否则 `INVALID_PREPARED_CALL`）；消息 `content` 必须是**类型化块数组**（否则 `content.some is not a function`）；
+> 免费档必须与运行时枚举取交集（池账号不是运行时 provider）；`applied: 0`（确定性已合并、模型返回空 diff）
+> 是正常结果，不上浮问题。
 
 ---
 
@@ -50,7 +56,7 @@ P0–P3 真正交付的比计划多：`memory-plan.md` 划给 P4/P5 的**提炼�
 | # | 缺口 | 证据 | P4 后 |
 |---|---|---|---|
 | 1 | **触发调度完全不存在** | `consolidator.run()` 全仓只有两个调用点：`src/index.ts:640`（`/memory 整理`）与 `src/host/routes.ts:174`（面板「立即整理」）。`consolidateOn` / `consolidateIntervalHours` / `consolidateIdleMinutes` / `consolidateFixedTime` 只被**解析和显示**（`store.ts:214-216,528`、`memory.tsx:56-63`），没有任何代码消费它们。`README.md:145-158` 的四种触发是**空头承诺**。 | ✅ 已修（§3.2 A，`src/host/schedule.ts`） |
-| 2 | **模型提炼不存在** | 全仓无 `llm` 使用：`openOneShotStream` / `prepareCall` / `resolveModelInfo` 零命中。`modelPolicy` / `modelAllowlist` 只解析+显示；`state.modelCooldown` 建了结构但**从未写入**。`consolidate.ts:373` 硬编码 `模型提炼：未启用（首版只做确定性整理）`，`protocol.ts` 里 `MemorySnapshot.consolidation.modelStage` 的类型就是字面量 `'disabled'`。 | ⬜ P5 |
+| 2 | **模型提炼不存在** | 全仓无 `llm` 使用：`openOneShotStream` / `prepareCall` / `resolveModelInfo` 零命中。`modelPolicy` / `modelAllowlist` 只解析+显示；`state.modelCooldown` 建了结构但**从未写入**。`consolidate.ts:373` 硬编码 `模型提炼：未启用（首版只做确定性整理）`，`protocol.ts` 里 `MemorySnapshot.consolidation.modelStage` 的类型就是字面量 `'disabled'`。 | ✅ 已修（§4，`src/host/distill.ts` + `src/host/model-picker.ts`，0.4.0） |
 | 3 | **技能草稿没有生产者** | `readDrafts` / `approveDraft` / `discardDraft` + 卡片 + 红点全都在，但**没有任何代码往 `skills-draft/` 里写**。`DraftView.repeats` / `createdAt` 只被读，没有写方。 | ⬜ P7 |
 | 4 | **项目级记忆没有写入方** | `memory/projects/<slug>.md` 只被 `prompt.ts:117-134` 读（`renderProject` 截断 1200 B）与 `watchProject()` 懒加载；`ensure()` 只建目录。`slugify()` 在 `prompt.ts:138` 定义但没有任何写入路径。 | ⬜ P6 |
 | 5 | **历史 / 回滚没有 UI** | `appendJournal` 与 `backup()` 写了数据，但**没有客户端读它们**，`MemoryAction` 里也没有 rollback / reset-all 类型。 | ✅ 已修（§3.2 C） |
@@ -85,14 +91,19 @@ node tools/verify-replay.mjs <已结束的 18.5 MB 真实日志> → 14/14
 | 新阶段 | 名称 | 一句话 | 对应旧编号 | 预估 | 状态 |
 |---|---|---|---|---|---|
 | **P4** | 自动整合闭环 | 让已经能跑的确定性整合**自己跑起来**，并且**看得见、撤得回** | P6 前半 + 新 | 中 | ✅ 0.3.0 |
-| **P5** | 模型提炼 | 在 P4 的两阶段骨架上接模型阶段：**用户自选优先** → 免费优先候选链 → 冷却 → 失败降级 | P6 后半 | 大 | ⬜ 下一阶段 |
-| **P6** | 项目级记忆 | `memory/projects/<slug>.md` 从只读变可写，并上 UI | 新 | 中 | ⬜ |
+| **P5** | 模型提炼 | 在 P4 的两阶段骨架上接模型阶段：**用户自选优先** → 免费优先候选链 → 冷却 → 失败降级 | P6 后半 | 大 | ✅ 0.4.0 |
+| **P6** | 项目级记忆 | `memory/projects/<slug>.md` 从只读变可写，并上 UI | 新 | 中 | ⬜ 下一阶段 |
 | **P7** | 技能进化 | 草稿生成器（≥3 次 / ≥2 日期）+ 详情页 + 编辑后批准 + 30 天归档 | P7 前半 | 中 | ⬜ |
 | **P8** | 隐私收尾与发布 | 彻底删除、`no-memory`、PII、文档对齐、Gitee | P8 | 小 | ⬜ |
 
 **排序理由**：P4 先把闭环合上——否则 P5 的模型阶段无处挂载；P5 会引入**不可预测的自动写入**，所以 P4 必须先把回滚与可观测性做出来；P7 的输入是 P4/P5 的整合产物；P8 收口。
 
 **P4 的实际收益（已兑现）**：数据目录里积压的 7 份会话笔记在影子实例启动 90 秒后被自动整理掉，产出第一条真实记忆条目；面板从此能看到「整理做了什么」（journal 文本 + 备份文件清单）并一键回滚。**P4 也让 §4.3 的并发缺陷提前修掉了**——那本是 P5 的前置任务，但它与触发调度同源（两者都引入「读-改-写之间夹 await」），所以并到 P4 一起做更省事。
+
+**P5 的实际收益（已兑现）**：真实模型调用端到端打通（`deepseek-account/deepseek-flash`，322–470 token/轮），
+候选经确定性合并后模型正确返回空 diff；冷却表单层键、自选/回退/白名单/`off` 全部真机验证。
+实现中发现的两个**运行时契约**与计划写的不同，已回写 §4.2：prepared 句柄必须按**解析后配置**分发；
+消息 `content` 必须是**类型化块数组**。免费档还必须与运行时枚举取交集——池目录里的账号名不是运行时 provider id。
 
 ---
 
@@ -230,8 +241,16 @@ prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCal
 ```ts
 // 正确路径：注册绑定的 prepareCall，而非公开的 llm.stream
 const handle = await llm.prepareCall({ provider, model, reasoningEffort?, temperature?, maxTokens? })
-for await (const chunk of handle.stream({ messages, system, signal })) { /* … */ }
+// 分发时用【解析后配置】：handle.stream 会用 callConfigEquals 逐字段比对请求与已解析配置，
+// 直接展开输入配置会在运行物化了默认值（如 reasoningEffort）时炸 INVALID_PREPARED_CALL（真机踩过）。
+for await (const chunk of handle.stream({ ...handle.config, messages, system, signal })) { /* … */ }
 ```
+
+> **0.4.0 实测补充（两条真机踩出来的契约）**：
+> 1. `handle.stream()` 的请求**必须**带 `...handle.config`（解析后配置），否则 `INVALID_PREPARED_CALL`；
+> 2. 消息 `content` 必须是**类型化块数组**（`[{type:'text', text}]`），不能是字符串——
+>    适配器按 `message.content.some(…)` 走块，传字符串炸 `content.some is not a function`（UNKNOWN）。
+>    正确形状：`messages: [{ role: 'user', content: [{ type: 'text', text }] }]`。
 
 - `ctx.llm` 的官方用法是 `ctx.llm.stream({provider, model, messages})`（见 `dsh-llm/README.md`），**但第三方 provider 插件可能覆写 `llm.stream` 为 waterfall 签名 `(options, next)`**，此时调用方会炸 `TypeError: next(...) is not a function or its return value is not async iterable`。`prepareCall()` 把适配器代际、重试策略绑死在句柄上，HMR 也不会串代际。
 - task-board 的 `openOneShotStream(llm, config, request)` 就是这个模式的封装（`@linxin666/dsh-client-ui-task-board/lib/types/host/llm-dispatch.d.ts`），可直接照抄其形状：**调用配置必须在 `config` 里，不能混进 `request`**。
@@ -357,24 +376,24 @@ for await (const chunk of handle.stream({ messages, system, signal })) { /* … 
 
 ### 4.8 验收标准
 
-| # | 验收 | 做法 |
-|---|---|---|
-| P5-0 | **并发写 state 不丢数据** | 模型调用处注入 10s 延迟 + 并发触发一次会话 flush → 整理后 `state.json` 两条写入都在（§4.3） |
-| P5-1 | diff 真的被应用 | 造 3 条待提炼候选 → 跑整理 → `memory/*.md` 出现新条目，journal 记录模型与 token |
-| P5-2 | **自选模型优先** | 在面板里选一个模型 → 跑整理 → journal 里的模型**就是它**（不是免费档） |
-| P5-3 | **自选失效会回退** | 把 `modelChoiceModel` 改成一个不存在的 id → 跑整理 → 整理照常完成，journal 有 `已回退到 <实际模型>` 一行，面板显示回退原因 |
-| P5-4 | **回退不撞墙（同一模型不连撞两次）** | 自选 `hy3` 且候选链首档也是 `hy3`，令其失败 → 冷却表里 `provider/model` 键**只有一个**；第 2 次触发**不发起**对 `hy3` 的调用，日志为 `处于冷却（剩 N 分钟）` |
-| P5-5 | **总预算生效** | 让候选链前 3 个都失败 → 模型阶段在 **60s 内**结束（不是 135s+），面板不报 timeout，`running` 归位为 false |
-| P5-6 | 下拉是真实枚举 | 下拉选项与 `llm.listProviders()` / `llm.listModels()` 结果一致；免费档带 `· 免费` 标记；**展开面板不触发网络风暴**（第二次展开走缓存） |
-| P5-7 | 免费标记按 (provider,id) 配对 | 构造一个只在一个 provider 下免费的模型 → 另一个 provider 下**不显示** `· 免费` |
-| P5-8 | 免费优先生效 | `modelChoiceModel` 为空、`modelPolicy: 'free-first'` 时，日志里的模型属于 {`hy4-preview-f`,`hy3`,`deepseek-v4.1-flash`} |
-| P5-9 | **白名单是硬边界** | `modelAllowlist` 填 `['hy3']` → 候选链只用 `hy3`；且 `modelChoiceModel` 选 `gpt-6-astra` 时**被拦下**并提示「加入白名单」，不发起调用 |
-| P5-10 | **`off` 压过自选** | `modelPolicy: 'off'` + 非空 `modelChoiceModel` → **不发起任何调用**，卡片显示「已关闭模型提炼」 |
-| P5-11 | effort 档位受校验 | 选一个不支持 `reasoning` 的模型 → 档位下拉为空或置灰，调用时**不传** `reasoningEffort` |
-| P5-12 | 降级不崩 | `llm` 服务不存在（headless 场景）→ 不发起任何调用，整理照常完成 |
-| P5-13 | 不覆盖用户编辑 | 手工 `pinned` 一条 → 跑整理 → 该条**逐字未变** |
-| P5-14 | 不发送原始对话 | 抓一次调用的入参，确认只有候选摘要与画像摘要 |
-| P5-15 | 回归 | 五个 verifier 全绿（§8.3） |
+| # | 验收 | 做法 | 结果（0.4.0） |
+|---|---|---|---|
+| P5-0 | **并发写 state 不丢数据** | 模型调用处注入 10s 延迟 + 并发触发一次会话 flush → 整理后 `state.json` 两条写入都在（§4.3） | ✅ `verify-host.mjs` 并发场景（§4.3 随 P4 修掉，`patchState` 合并语义） |
+| P5-1 | diff 真的被应用 | 造 3 条待提炼候选 → 跑整理 → `memory/*.md` 出现新条目，journal 记录模型与 token | ✅ 单测覆盖 `distillStage` 的 add/update 折叠（真机：确定性已合并时模型正确返回空 diff，`应用 0 条` 是正常结果） |
+| P5-2 | **自选模型优先** | 在面板里选一个模型 → 跑整理 → journal 里的模型**就是它**（不是免费档） | ✅ 真机：选 `deepseek-official/deepseek-flash` → `runtime.modelChoice` 真实校验（efforts/defaultEffort/contextWindow） |
+| P5-3 | **自选失效会回退** | 把 `modelChoiceModel` 改成一个不存在的 id → 跑整理 → 整理照常完成，journal 有 `已回退到 <实际模型>` 一行，面板显示回退原因 | ✅ 单测 + 真机：自选失败 → 链内下一个候选接管，`fellBackFrom` 记录 |
+| P5-4 | **回退不撞墙（同一模型不连撞两次）** | 自选 `hy3` 且候选链首档也是 `hy3`，令其失败 → 冷却表里 `provider/model` 键**只有一个**；第 2 次触发**不发起**对 `hy3` 的调用，日志为 `处于冷却（剩 N 分钟）` | ✅ 真机：冷却表只出现单层键（无 `choice:` 前缀），第 2 轮直接 `没有可用的模型（或都在冷却中）` |
+| P5-5 | **总预算生效** | 让候选链前 3 个都失败 → 模型阶段在 **60s 内**结束（不是 135s+），面板不报 timeout，`running` 归位为 false | ✅ `verify-model.mjs` P5-10（45s 真实等待场景） |
+| P5-6 | 下拉是真实枚举 | 下拉选项与 `llm.listProviders()` / `llm.listModels()` 结果一致；免费档带 `· 免费` 标记；**展开面板不触发网络风暴**（第二次展开走缓存） | ✅ 真机：`GET /models` 返回运行时真实枚举；宿主缓存 10 分钟 + `llm/adapters-updated` 失效 |
+| P5-7 | 免费标记按 (provider,id) 配对 | 构造一个只在一个 provider 下免费的模型 → 另一个 provider 下**不显示** `· 免费` | ✅ 单测：`readFreeModels` 按 `(provider, id)` 配对 |
+| P5-8 | 免费优先生效 | `modelChoiceModel` 为空、`modelPolicy: 'free-first'` 时，日志里的模型属于 {`hy4-preview-f`,`hy3`,`deepseek-v4.1-flash`} | ✅ 单测（免费档与运行时枚举取交集）；真机环境免费池账号不是运行时 provider，交集为空 → 按设计落到第 5 级 |
+| P5-9 | **白名单是硬边界** | `modelAllowlist` 填 `['hy3']` → 候选链只用 `hy3`；且 `modelChoiceModel` 选 `gpt-6-astra` 时**被拦下**并提示「加入白名单」，不发起调用 | ✅ 单测 `allows()` 硬边界 + 卡片「加入白名单」按钮 |
+| P5-10 | **`off` 压过自选** | `modelPolicy: 'off'` + 非空 `modelChoiceModel` → **不发起任何调用**，卡片显示「已关闭模型提炼」 | ✅ 单测 + 真机（卡片置灰） |
+| P5-11 | effort 档位受校验 | 选一个不支持 `reasoning` 的模型 → 档位下拉为空或置灰，调用时**不传** `reasoningEffort` | ✅ 档位只来自 `resolveModelInfo().reasoning.efforts`（真机：`deepseek-flash` 给出 `off/low/high/max`） |
+| P5-12 | 降级不崩 | `llm` 服务不存在（headless 场景）→ 不发起任何调用，整理照常完成 | ✅ `verify-model.mjs` P5-12（`routes()` 返回空 → `当前环境没有 llm 服务`，不抛） |
+| P5-13 | 不覆盖用户编辑 | 手工 `pinned` 一条 → 跑整理 → 该条**逐字未变** | ✅ `verify-model.mjs` P5 校验链（锚点不匹配/pinned/不存在条目都拒绝） |
+| P5-14 | 不发送原始对话 | 抓一次调用的入参，确认只有候选摘要与画像摘要 | ✅ `verify-model.mjs` P5-14（入参含候选摘要、无 `## 做了什么` 原文标记） |
+| P5-15 | 回归 | 五个 verifier 全绿（§8.3） | ✅ 六个全绿：host 49/49、schedule 14/14、model 30/30（新增）、bundle 10/10、client-factory 13/13、headless 11、replay 14/14 |
 
 ---
 
@@ -514,6 +533,9 @@ for await (const chunk of handle.stream({ messages, system, signal })) { /* … 
     - 断言要匹配**真实文案**：历史卡片的按钮在展开前叫「历史」，展开后才变成「查看当天日志」；`待你确认` 卡片只在 `questions.length > 0` 时渲染，空列表下它**本来就不该出现**——按固定文案硬找会得到假失败。
 17. **在运行中的实例旁边改 `state.json` 一定会被覆盖**：采集器会在会话 flush 时重写它。要造测试数据（如冲突候选），**必须先停实例、写好、再启动**；写完立刻通过 HTTP 触发一次整理，别指望手改的 `pending` 能活过下一次 flush。
 18. **写文件别带 BOM**：插件用普通 `utf8` 读写，`Set-Content -Encoding UTF8` 在 Windows PowerShell 5.1 下会写 BOM，导致 front-matter 第一个键变成 `\ufeff---`。用 `[System.IO.File]::WriteAllText(path, text, New-Object System.Text.UTF8Encoding($false))`。
+19. **P5 模型调试：插件日志要镜像到 stderr**：`dsh web` 组合下 `ctx.logger?.info` **没有任何落盘目标**（serverN.log / logs/ / plugin-manager/logs 都没有），模型失败的真实报错完全不可见。`src/index.ts` 的 `log()` 已加 try/catch 保护的 `console.error` 镜像——插件报错去 `serverN.err.log`。
+20. **影子实例没有凭据**：独立 `DSH_HOME` 下 `deepseek-official` 路由会报 `MISSING_CREDENTIAL`（no API key for provider route），被归类 `auth` 写 24h 冷却。要真机跑通模型调用，把 `C:\Users\<你>\.dsh\.credentials.yaml` 拷进影子 home。注意 `deepseek-account` 与 `deepseek-official` 是**两条路由**，凭据只解其中之一。
+21. **池目录的免费模型 ≠ 运行时可路由**：`$DSH_HOME/.workbuddy-*.json` 里的账号名（如 `17bb6eaf-…`）**不是运行时 provider id**——运行时枚举里根本没有它们。候选链的免费档必须与运行时枚举**取交集**，交集为空就落到下一级，这不是 bug 而是设计（撞一个运行时路由不了的模型只会白白烧一次预算）。
 
 ### 8.3 每次提交前必须过
 
@@ -526,10 +548,11 @@ node tools/verify-client-factory.mjs   # 期望 13/13
 node tools/verify-headless.mjs         # 期望 11 passed, 0 failed
 node tools/verify-host.mjs             # 期望 49/49（P4 后；此前 35/35）
 node tools/verify-schedule.mjs         # 期望 14/14（P4 新增）
+node tools/verify-model.mjs            # 期望 30/30（P5 新增）
 node tools/verify-replay.mjs "C:\Users\A3373\.dsh\sessions\--D-dsh-workbuddy-memory--\session-ebae0951-2d5d-40f2-bc44-21f65142d9a9\session.v4.jsonl.zstd"   # 期望 14/14
 ```
 
-> 最后一条**必须用已结束的日志**（见陷阱 8）。上表基线为 2026-10-16（0.3.0）实测值，新增功能后只应上升不应下降。
+> 最后一条**必须用已结束的日志**（见陷阱 8）。上表基线为 2026-10-16（0.4.0）实测值，新增功能后只应上升不应下降。
 
 **真机验收（改动宿主半边后必须做一次）**：`verify-*.mjs` 跑的是打桩宿主，抓不到「路由是否真的注册上」「面板卡片是否真的渲染」这类问题。做法见陷阱 15。
 
@@ -547,10 +570,10 @@ node tools/verify-replay.mjs "C:\Users\A3373\.dsh\sessions\--D-dsh-workbuddy-mem
 | # | 事项 | 选项 | 我的建议 | 状态 |
 |---|---|---|---|---|
 | 1 | **P4 触发默认值** | 沿用 `startup-idle`（启动补齐 + 空闲）／ 只留手动 | **沿用**。README 已承诺，且实测数据目录里 7 份笔记从未被整理过，正是缺这一环 | ✅ 已按建议实现（`templates.ts` 默认 `startup-idle`） |
-| 2 | **模型提炼默认开关** | `modelPolicy: 'free-first'` 默认开 ／ 默认 `off` 纯确定性 | **默认开**。免费档实测有 3 个可用模型，额度消耗≈0；面板随时可切 `off` | ⬜ 待你确认（P5） |
-| 2b | **自选模型是否默认空** | `modelChoiceProvider` / `modelChoiceModel` 均 `""`（不指定，走免费优先）／ 预填一个（如 `hy3`） | **默认空**。想指定的人自己去下拉里选；不想管的人无感 | ⬜ 待你确认（P5） |
-| 2c | **`modelAllowlist` 非空时是否约束自选** | 硬边界（自选也受约束，越界时给「加入白名单」按钮）／ 只管候选链（自选永远放行） | **硬边界**。用户声明了白名单就是声明了边界，让自选绕过等于自相矛盾（§4.4 规则 5） | ⬜ 待你确认（P5） |
-| 3 | **P5 是否发原始对话** | 只发候选摘要 ／ 发原始对话 | **只发摘要**（`memory-plan.md` §7 原文），隐私底线 | ⬜ 待你确认（P5） |
+| 2 | **模型提炼默认开关** | `modelPolicy: 'free-first'` 默认开 ／ 默认 `off` 纯确定性 | **默认开**。免费档实测有 3 个可用模型，额度消耗≈0；面板随时可切 `off` | ✅ 已拍板（m01973：按推荐，默认开） |
+| 2b | **自选模型是否默认空** | `modelChoiceProvider` / `modelChoiceModel` 均 `""`（不指定，走免费优先）／ 预填一个（如 `hy3`） | **默认空**。想指定的人自己去下拉里选；不想管的人无感 | ✅ 已拍板（m01973：按推荐，默认空） |
+| 2c | **`modelAllowlist` 非空时是否约束自选** | 硬边界（自选也受约束，越界时给「加入白名单」按钮）／ 只管候选链（自选永远放行） | **硬边界**。用户声明了白名单就是声明了边界，让自选绕过等于自相矛盾（§4.4 规则 5） | ✅ 已拍板（m01973：按推荐，硬边界） |
+| 3 | **P5 是否发原始对话** | 只发候选摘要 ／ 发原始对话 | **只发摘要**（`memory-plan.md` §7 原文），隐私底线 | ✅ 已拍板（m01973：按推荐，只发摘要） |
 | 4 | **`no-memory` 标记怎么表达** | 会话标题前缀 ／ 工作目录放 `.no-memory` 文件 ／ 面板手动标记 | **工作目录放 `.no-memory`**——最符合"按项目关记忆"的直觉，且不依赖会话命名 | ⬜ 待你确认（P8） |
 | 5 | **P6 项目记忆是否默认开** | 默认开（自动积累）／ 默认关（手动启用） | **默认开**，但只写 `$DSH_HOME`，仓库零污染（P6-4 已作为验收项） | ⬜ 待你确认（P6） |
 | 6 | **P7 技能草稿的生成是否要用户确认** | 自动生成草稿 + 用户批准落盘 ／ 生成前也先问 | **自动生成草稿**（`memory-plan.md` §6.2 原文：默认绝不自动**写入**，但生成草稿本身可以自动） | ⬜ 待你确认（P7） |

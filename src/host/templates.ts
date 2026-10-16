@@ -32,6 +32,9 @@ export const DEFAULT_PREFERENCES = {
   consolidateQuiet: true,
   modelPolicy: 'free-first',
   modelAllowlist: [] as string[],
+  modelChoiceProvider: '',
+  modelChoiceModel: '',
+  modelChoiceEffort: '',
   promptBudgetBytes: 4096,
 } as const
 
@@ -56,6 +59,9 @@ export function preferencesTemplate(now: string): string {
       consolidateQuiet: DEFAULT_PREFERENCES.consolidateQuiet,
       modelPolicy: DEFAULT_PREFERENCES.modelPolicy,
       modelAllowlist: [...DEFAULT_PREFERENCES.modelAllowlist],
+      modelChoiceProvider: DEFAULT_PREFERENCES.modelChoiceProvider,
+      modelChoiceModel: DEFAULT_PREFERENCES.modelChoiceModel,
+      modelChoiceEffort: DEFAULT_PREFERENCES.modelChoiceEffort,
       promptBudgetBytes: DEFAULT_PREFERENCES.promptBudgetBytes,
     },
     [

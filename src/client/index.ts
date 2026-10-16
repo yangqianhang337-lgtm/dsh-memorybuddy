@@ -141,6 +141,7 @@ function applyInner(ctx: ClientLike): void {
     onAction: (action: Record<string, unknown>): Promise<boolean> => controller.act(action),
     onConsolidate: () => controller.consolidate(),
     onJournal: (date: string) => controller.journal(date),
+    onCatalog: () => controller.catalog(),
   }
 
   registerMemoryBuddyPanel(ctx as unknown as { slots: unknown }, face)

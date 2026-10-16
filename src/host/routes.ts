@@ -1,8 +1,9 @@
 /**
- * The HTTP surface: one prefix, five routes, and the same auth fence the
+ * The HTTP surface: one prefix, seven routes, and the same auth fence the
  * task-board plugin uses.
  *
- * The five are `state`, `save`, `preferences`, `journal` and `action`.
+ * The seven are `state`, `models`, `consolidate-status`, `save`, `preferences`,
+ * `journal` and `action`.
  *
  * The prefix is root-absolute (`/api/memorybuddy`) because the route table
  * matches on the request URL; the browser half builds its URLs from
@@ -20,7 +21,14 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { API_PREFIX, asRecord, type MemoryAction } from '../protocol.ts'
+import {
+  API_PREFIX,
+  asRecord,
+  type MemoryAction,
+  type MemorySnapshot,
+  type ModelCatalog,
+  type RuntimeView,
+} from '../protocol.ts'
 import { asJsonObject, isJsonRequest, readJsonBody, writeJson } from './http.ts'
 import { isLoopbackAddress, isLoopbackRequest } from './loopback.ts'
 import type { MemoryStore } from './store.ts'
@@ -76,6 +84,17 @@ export interface RoutesHost {
   /** Re-render the injected prompt section after a write. */
   onChanged: () => void
   log: (message: string) => void
+  /**
+   * Live runtime facts (`running`, the resolved model pick).
+   *
+   * They are a callback, not a value, because they describe the runtime *now*:
+   * a pass can be in flight, and the model registry can change between requests.
+   * They are also deliberately absent from `state.json` — a persisted
+   * `running: true` would still claim a pass is in flight after a crash.
+   */
+  runtime?: () => Promise<RuntimeView>
+  /** The enumerated model catalogue, cached host-side by the picker. */
+  catalog?: () => Promise<ModelCatalog>
 }
 
 /** Build the route table. */
@@ -86,6 +105,25 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
     return false
   }
 
+  /**
+   * Attach the live half of the snapshot.
+   *
+   * A failing runtime probe must not take the whole panel down: the stored half
+   * (entries, documents, questions) is the part the user came for, so a failure
+   * degrades to the one fact the routes can always answer themselves.
+   */
+  const withRuntime = async (snapshot: MemorySnapshot): Promise<MemorySnapshot> => {
+    if (host.runtime === undefined) {
+      return { ...snapshot, runtime: { running: host.consolidator.busy } }
+    }
+    try {
+      return { ...snapshot, runtime: await host.runtime() }
+    } catch (error) {
+      host.log(`读取运行时状态失败：${String(error)}`)
+      return { ...snapshot, runtime: { running: host.consolidator.busy } }
+    }
+  }
+
   return [
     {
       kind: 'exact',
@@ -93,8 +131,54 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
       handler: async (request, response) => {
         if (request.method !== 'GET') return writeJson(response, 405, { ok: false, error: 'method-not-allowed' })
         if (!guard(request, response)) return
+        writeJson(response, 200, await withRuntime(await host.store.snapshot()))
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${API_PREFIX}/models`,
+      handler: async (request, response) => {
+        if (request.method !== 'GET') return writeJson(response, 405, { ok: false, error: 'method-not-allowed' })
+        if (!guard(request, response)) return
+        if (host.catalog === undefined) {
+          const empty: ModelCatalog = {
+            providers: [],
+            models: [],
+            fetchedAt: new Date().toISOString(),
+            note: '当前环境没有可用的模型服务',
+          }
+          return writeJson(response, 200, { ok: true, catalog: empty })
+        }
+        try {
+          writeJson(response, 200, { ok: true, catalog: await host.catalog() })
+        } catch (error) {
+          host.log(`枚举模型失败：${String(error)}`)
+          writeJson(response, 200, {
+            ok: true,
+            catalog: { providers: [], models: [], fetchedAt: new Date().toISOString(), note: String(error) },
+          })
+        }
+      },
+    },
+    {
+      kind: 'exact',
+      path: `${API_PREFIX}/consolidate-status`,
+      handler: async (request, response) => {
+        if (request.method !== 'GET') return writeJson(response, 405, { ok: false, error: 'method-not-allowed' })
+        if (!guard(request, response)) return
+        // A light poll target: the full snapshot re-reads every document and
+        // recomputes a sha1 revision, which is far too much work to repeat every
+        // two seconds while a model call is in flight.
         const snapshot = await host.store.snapshot()
-        writeJson(response, 200, snapshot)
+        writeJson(response, 200, {
+          ok: true,
+          running: host.consolidator.busy,
+          revision: snapshot.revision,
+          consolidation: snapshot.consolidation,
+          questions: snapshot.questions,
+          history: snapshot.history,
+          pending: snapshot.sessions.pending,
+        })
       },
     },
     {
@@ -123,7 +207,7 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
           })
         }
         host.onChanged()
-        writeJson(response, 200, { ok: true, snapshot: await host.store.snapshot() })
+        writeJson(response, 200, { ok: true, snapshot: await withRuntime(await host.store.snapshot()) })
       },
     },
     {
@@ -139,7 +223,7 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
         if (patch === undefined) return writeJson(response, 400, { ok: false, error: 'invalid-patch' })
         await host.store.patchPreferences({ patch: patch as never })
         host.onChanged()
-        writeJson(response, 200, { ok: true, snapshot: await host.store.snapshot() })
+        writeJson(response, 200, { ok: true, snapshot: await withRuntime(await host.store.snapshot()) })
       },
     },
     {
@@ -169,9 +253,10 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
           return writeJson(response, 400, { ok: false, error: 'invalid-action' })
         }
         // Consolidation is the one action that can outlive the browser's 15s
-        // timeout (§4.4 规则 0). It answers immediately and reports through the
-        // snapshot the panel is already polling, so a slow pass reads as
-        // "整理中" instead of as a failed click.
+        // timeout (§4.4 规则 0) — with a model stage it can run for a minute. It
+        // answers immediately and reports through the snapshot the panel is
+        // already polling, so a slow pass reads as "整理中" instead of as a
+        // failed click.
         if (record.kind === 'consolidate') {
           const started = host.consolidator.busy ? false : true
           if (started) {
@@ -188,13 +273,13 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
           return writeJson(response, 202, {
             ok: true,
             result: { started, reason: started ? undefined : '上一次整理还在进行中' },
-            snapshot: await host.store.snapshot(),
+            snapshot: await withRuntime(await host.store.snapshot()),
           })
         }
         try {
           const result = await runAction(host, record as unknown as MemoryAction)
           host.onChanged()
-          writeJson(response, 200, { ok: true, result, snapshot: await host.store.snapshot() })
+          writeJson(response, 200, { ok: true, result, snapshot: await withRuntime(await host.store.snapshot()) })
         } catch (error) {
           host.log(`动作失败：${String(error)}`)
           writeJson(response, 500, { ok: false, error: String(error) })

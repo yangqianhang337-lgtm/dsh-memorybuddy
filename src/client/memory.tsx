@@ -14,14 +14,26 @@ import { Button, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   Banner,
   Card,
+  ChoiceMenu,
   Confirm,
   DocumentBody,
   EntryList,
+  OptionMenu,
   Row,
   ToastHost,
+  type LabelledOption,
   type Translate,
 } from './cards.tsx'
-import { CONSOLIDATE_MODES, TOPICS, type DraftView, type EntryView, type JournalView, type MemorySnapshot, type SessionNoteView } from '../protocol.ts'
+import {
+  CONSOLIDATE_MODES,
+  TOPICS,
+  type DraftView,
+  type EntryView,
+  type JournalView,
+  type ModelCatalog,
+  type MemorySnapshot,
+  type SessionNoteView,
+} from '../protocol.ts'
 import { cx, panelCss as css } from './styles.ts'
 
 export interface MemoryPageProps {
@@ -38,6 +50,14 @@ export interface MemoryPageProps {
   onConsolidate: () => Promise<{ started: boolean; reason?: string }>
   /** Read one journal day for the history view. */
   onJournal: (date: string) => Promise<JournalView | undefined>
+  /**
+   * Read the runtime's model catalogue, for the picker card's dropdown.
+   *
+   * Separate from `onAction` because it is the one panel read that may cost a
+   * network round trip: the host caches it, and the card only asks for it when
+   * the user actually opens the dropdown.
+   */
+  onCatalog: () => Promise<ModelCatalog | undefined>
   /**
    * Render the page heading (title + schedule line). The first-level panel keeps
    * it because that drop has no nav label of ours; the Settings drop passes
@@ -67,6 +87,190 @@ function scheduleLine(t: Translate, snapshot: MemorySnapshot | undefined): strin
     return `${base}（${snapshot.preferences.consolidateIdleMinutes} 分钟）`
   }
   return base
+}
+
+/**
+ * One model entry as the dropdown renders it (§4.4).
+ *
+ * The id is the `provider/model` route — the same string the host stores in
+ * `modelChoiceProvider` + `modelChoiceModel` and keys its cooldown table by.
+ * The label is for humans only; the host never parses it back.
+ */
+function modelOptions(catalog: ModelCatalog | undefined): LabelledOption[] {
+  if (catalog === undefined) return []
+  return catalog.models.map(model => ({
+    id: `${model.provider}/${model.id}`,
+    label: `${model.name}（${model.provider}/${model.id}）${model.free ? ' · 免费' : ''}`,
+  }))
+}
+
+/**
+ * The 「提炼模型」 card (memorybuddy-plan §4.4).
+ *
+ * Everything on it is derived: the dropdown is a live enumeration from the host,
+ * the verdict is the host's `resolveModelInfo` result, and the allowlist button
+ * exists because a non-empty allowlist is a HARD boundary that binds the user's
+ * own choice too (§4.4 rule 5). There is no client-side copy of the policy.
+ *
+ * `off` greys the card out (§4.4 rule 6) rather than hiding it, so the user can
+ * still see what they picked and find the switch that turns it back on.
+ */
+function ModelPickerCard({
+  t,
+  snapshot,
+  busy,
+  onPatch,
+  onCatalog,
+}: {
+  t: Translate
+  snapshot: MemorySnapshot | undefined
+  busy: boolean
+  onPatch: (patch: Record<string, unknown>) => void
+  onCatalog: () => Promise<ModelCatalog | undefined>
+}): React.ReactElement {
+  const [catalog, setCatalog] = React.useState<ModelCatalog | undefined>(undefined)
+  const [fetched, setFetched] = React.useState(false)
+  const preferences = snapshot?.preferences
+  const choice = snapshot?.runtime?.modelChoice
+  const provider = preferences?.modelChoiceProvider ?? ''
+  const model = preferences?.modelChoiceModel ?? ''
+  const route = provider !== '' && model !== '' ? `${provider}/${model}` : ''
+  const policy = preferences?.modelPolicy ?? 'free-first'
+  const off = policy === 'off'
+  const options = modelOptions(catalog)
+
+  /**
+   * Fetch the enumeration on first use.
+   *
+   * The host caches it with a TTL and invalidates on `llm/adapters-updated`,
+   * so this is once per panel life in practice — but the card never blocks on
+   * it: until the answer lands the dropdown simply has no options.
+   */
+  const load = React.useCallback(async (): Promise<void> => {
+    if (fetched) return
+    setFetched(true)
+    const next = await onCatalog()
+    setCatalog(next)
+  }, [fetched, onCatalog])
+
+  const allowlist = preferences?.modelAllowlist ?? []
+  const efforts = choice?.efforts ?? []
+  const effort = preferences?.modelChoiceEffort ?? ''
+
+  return (
+    <Card title={t('memory.modelPick')} description={t('memory.modelPickHint')}>
+      <Row>
+        <div className={css.cardText}>
+          <div className={css.cardTitle}>{t('memory.modelPick')}</div>
+          <div className={css.cardDesc}>{route === '' ? t('memory.modelPickAuto') : t('memory.modelPickValue', { provider, model })}</div>
+        </div>
+        <div className={cx(css.pickRow, off ? css.pickOff : undefined)}>
+          <span onMouseEnter={() => void load()} onFocus={() => void load()}>
+            <OptionMenu
+              value={route}
+              options={options}
+              placeholder={fetched && options.length === 0 ? t('memory.modelPickEmpty') : t('memory.modelPickAuto')}
+              disabled={off || busy}
+              ariaLabel={t('memory.modelPick')}
+              onSelect={next => {
+                const [nextProvider, ...rest] = next.split('/')
+                if (nextProvider === undefined || rest.length === 0) return
+                const nextModel = rest.join('/')
+                onPatch({ modelChoiceProvider: nextProvider, modelChoiceModel: nextModel, modelChoiceEffort: '' })
+              }}
+            />
+          </span>
+          {route !== '' && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={off || busy}
+              onClick={() => onPatch({ modelChoiceProvider: '', modelChoiceModel: '', modelChoiceEffort: '' })}
+            >
+              {t('memory.modelPickReset')}
+            </Button>
+          )}
+        </div>
+      </Row>
+
+      {/*
+        The verdict comes from the host's live `resolveModelInfo`, refreshed on
+        every snapshot. It is what makes a stale pick visible instead of only
+        failing on the next pass.
+      */}
+      {off ? (
+        <div className={css.pickWarn}>{t('memory.modelPickOff')}</div>
+      ) : route === '' ? (
+        <div className={css.note}>{t('memory.modelPickAuto')}</div>
+      ) : choice === undefined ? (
+        <div className={css.note}>{t('memory.modelStage')}</div>
+      ) : (
+        <>
+          {choice.blockedByAllowlist ? (
+            <div className={cx(css.error, css.pickRow)}>
+              <span>{t('memory.modelPickBlocked')}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => onPatch({ modelAllowlist: [...allowlist, `${provider}/${model}`] })}
+              >
+                {t('memory.modelPickAllow')}
+              </Button>
+            </div>
+          ) : choice.ok ? (
+            <div className={css.pickOk}>
+              {t('memory.modelPickOk', {
+                context: choice.contextWindow === undefined ? '—' : String(choice.contextWindow),
+              })}
+            </div>
+          ) : (
+            <div className={css.pickBad}>
+              {t('memory.modelPickBad', { reason: choice.reason ?? 'unknown' })}
+            </div>
+          )}
+          {!choice.blockedByAllowlist && choice.cooling && (
+            <div className={css.pickWarn}>{t('memory.modelPickCooling', { minutes: '—' })}</div>
+          )}
+          {choice.ok && !choice.blockedByAllowlist && efforts.length > 0 && (
+            <Row>
+              <div className={css.cardText}>
+                <div className={css.cardTitle}>{t('memory.modelPickEffort')}</div>
+                <div className={css.cardDesc}>{choice.defaultEffort ?? efforts[0]}</div>
+              </div>
+              <ChoiceMenu
+                value={effort === '' ? (choice.defaultEffort ?? efforts[0]) : effort}
+                options={efforts}
+                disabled={off || busy}
+                ariaLabel={t('memory.modelPickEffort')}
+                onSelect={next => onPatch({ modelChoiceEffort: next === choice.defaultEffort ? '' : next })}
+              />
+            </Row>
+          )}
+        </>
+      )}
+
+      {/* What the last pass actually did, from the journal's model record. */}
+      <div className={css.pick}>
+        <div className={css.note}>
+          {snapshot?.consolidation.model !== undefined && snapshot.consolidation.model.used !== undefined
+            ? `${t('memory.modelRun', { model: snapshot.consolidation.model.used })}${
+                snapshot.consolidation.model.tokens === undefined
+                  ? ''
+                  : t('memory.modelRunTokens', { tokens: String(snapshot.consolidation.model.tokens) })
+              }${
+                snapshot.consolidation.model.fellBackFrom === undefined
+                  ? ''
+                  : t('memory.modelRunFallback', { from: snapshot.consolidation.model.fellBackFrom })
+              }`
+            : snapshot?.consolidation.model?.skippedReason === undefined
+              ? t('memory.modelPickAuto')
+              : t('memory.modelRunSkipped', { reason: snapshot.consolidation.model.skippedReason })}
+        </div>
+        <div className={css.note}>{t('memory.modelPickNote')}</div>
+      </div>
+    </Card>
+  )
 }
 
 /** The pending-draft cards (§6.2 step 3: approve or discard, one by one). */
@@ -120,6 +324,7 @@ export function MemoryPage({
   onAction,
   onConsolidate,
   onJournal,
+  onCatalog,
   heading = true,
   bare = false,
 }: MemoryPageProps): React.ReactElement {
@@ -484,6 +689,20 @@ export function MemoryPage({
         are reviewed.
       */}
       {!bare && (
+        <>
+        {/*
+          The model picker sits above the schedule card: it is the thing you
+          configure once, and the schedule card is what you trigger. Both live
+          in the first-level panel only, because the bare (onboarding) panel has
+          nowhere to show a catalogue dropdown.
+        */}
+        <ModelPickerCard
+          t={t}
+          snapshot={snapshot}
+          busy={busy}
+          onPatch={onPatch}
+          onCatalog={onCatalog}
+        />
         <Card title={t('memory.schedule')}>
           <Row>
             <div className={css.cardText}>
@@ -515,6 +734,7 @@ export function MemoryPage({
           */}
           <div className={css.note}>{snapshot?.consolidation.modelNote ?? t('memory.modelStage')}</div>
         </Card>
+        </>
       )}
 
       {/*

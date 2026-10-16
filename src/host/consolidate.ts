@@ -24,8 +24,9 @@ import {
   similarity,
   type Entry,
 } from './entries.ts'
-import { TOPICS, type Confidence, type EntryView, type TopicKey } from '../protocol.ts'
+import { TOPICS, type Confidence, type EntryView, type ModelRunView, type TopicKey } from '../protocol.ts'
 import { frontString, parseDocument } from './document.ts'
+import type { Distiller } from './distill.ts'
 import type { MemoryStore, PluginState } from './store.ts'
 
 /** A candidate lifted out of one session note. */
@@ -50,6 +51,8 @@ export interface ConsolidationReport {
   questions: string[]
   files: string[]
   at: string
+  /** What the model stage did, when it ran at all (§4.4). */
+  model?: ModelRunView
 }
 
 /** Decay windows, in days (memory-plan §5.3). */
@@ -113,10 +116,24 @@ export class Consolidator {
   private readonly store: MemoryStore
   private readonly log: (message: string) => void
   private running = false
+  /**
+   * The model stage, injected after construction.
+   *
+   * It is a setter rather than a constructor argument because `index.ts` builds
+   * the store and the consolidator before it can soft-probe `ctx.get('llm')`,
+   * and the scheduler may already be ticking. Absent means deterministic-only,
+   * which is exactly the pre-P5 behaviour.
+   */
+  private distiller: Distiller | undefined
 
   constructor(store: MemoryStore, log: (message: string) => void) {
     this.store = store
     this.log = log
+  }
+
+  /** Install the model stage. Called once the `llm` service is known. */
+  setDistiller(distiller: Distiller | undefined): void {
+    this.distiller = distiller
   }
 
   /** True while a pass is in flight. */
@@ -198,6 +215,13 @@ export class Consolidator {
       this.applyCandidate(entries, candidate, report)
     }
 
+    // 3.5 The model stage. It runs on the candidates the deterministic pass just
+    //     consumed, and its operations go through the same merge path, so a
+    //     model suggestion can merge into an entry rather than duplicate it.
+    //     Everything about it is optional: if it is absent, fails, or returns
+    //     nothing usable, step 4 onward proceeds exactly as before.
+    await this.distillStage(candidates, entriesByTopic, report)
+
     // 4. Decay: archive what has gone stale, question what claims to be settled.
     for (const topic of TOPICS) {
       const entries = entriesByTopic.get(topic.key)
@@ -234,7 +258,72 @@ export class Consolidator {
       pending: current.pending.filter(relative => !consumed.includes(relative)),
       lastConsolidateAt: report.at,
       questions: this.mergeQuestions(current.questions, report.questions),
+      ...(report.model === undefined ? {} : { lastModelRun: report.model }),
     }))
+  }
+
+  /**
+   * Run the model stage and fold whatever survives validation into the topics.
+   *
+   * This method must never throw: the deterministic result is already in memory
+   * and is about to be written, and losing it because a model route was flaky
+   * would be strictly worse than never having called a model at all.
+   */
+  private async distillStage(
+    candidates: readonly Candidate[],
+    entriesByTopic: Map<TopicKey, Entry[]>,
+    report: ConsolidationReport,
+  ): Promise<void> {
+    const distiller = this.distiller
+    if (distiller === undefined) return
+    let outcome
+    try {
+      outcome = await distiller.run({ candidates, entriesByTopic })
+    } catch (error) {
+      // `Distiller.run` already swallows its own failures; this is the belt to
+      // that suspenders, because a throw here would lose the whole pass.
+      this.log(`模型提炼异常：${String(error)}`)
+      report.model = { skippedReason: `模型提炼异常：${String(error)}`, at: report.at }
+      return
+    }
+    report.model = {
+      ...(outcome.used === undefined ? {} : { used: outcome.used }),
+      ...(outcome.fellBackFrom === undefined ? {} : { fellBackFrom: outcome.fellBackFrom }),
+      ...(outcome.skippedReason === undefined ? {} : { skippedReason: outcome.skippedReason }),
+      ...(outcome.failures.length === 0 ? {} : { failures: outcome.failures }),
+      ...(outcome.rejected.length === 0 ? {} : { rejected: outcome.rejected }),
+      tokens: outcome.tokens,
+      applied: 0,
+      at: report.at,
+    }
+    for (const proposal of outcome.proposals) {
+      const entries = entriesByTopic.get(proposal.topic)
+      if (entries === undefined) continue
+      if (proposal.op === 'update') {
+        const target = entries.find(entry => entry.id === proposal.id)
+        // `validate` proved the entry existed and was not pinned; it can still
+        // be gone here if an earlier proposal in the same diff replaced it.
+        if (target === undefined) continue
+        target.text = proposal.text
+        report.model.applied = (report.model.applied ?? 0) + 1
+        continue
+      }
+      // An `add` goes through the same similarity/contradiction machinery as a
+      // candidate, so the model cannot create a near-duplicate of an entry the
+      // deterministic pass already merged.
+      this.applyCandidate(
+        entries,
+        { text: proposal.text, topic: proposal.topic, source: '模型提炼', date: dayKey() },
+        report,
+      )
+      report.model.applied = (report.model.applied ?? 0) + 1
+    }
+    // applied === 0 is a NORMAL outcome here: the deterministic stage has
+    // already merged every candidate by the time the model sees them, so a
+    // correct `{"ops":[]}` is the expected reply most passes. The journal line
+    // already records 应用 0 条; raising a 待确认 question for it would nag the
+    // user on every pass and teach them to ignore the card.
+    for (const rejection of outcome.rejected) report.questions.push(`模型提炼被拒绝：${rejection}`)
   }
 
   /**
@@ -389,12 +478,35 @@ export class Consolidator {
       `扫描会话笔记 ${report.scanned} 个（本次标记为已整理 ${consumed.length} 个）`,
       `新增 ${report.added} 条 · 合并 ${report.merged} 条 · 冲突 ${report.conflicted} 条 · 归档 ${report.archived} 条`,
       `改写文件：${changed.length === 0 ? '（无）' : changed.map(topic => `memory/${topic.file}`).join('、')}`,
-      '模型提炼：未启用（首版只做确定性整理）',
+      ...this.modelLines(report),
     ]
     if (report.questions.length > 0) {
       lines.push(`待确认 ${report.questions.length} 项：`)
       for (const question of report.questions) lines.push(`  - ${question}`)
     }
+    return lines
+  }
+
+  /**
+   * The journal's account of the model stage.
+   *
+   * The journal is the audit trail the user reads when they want to know what a
+   * pass actually did, so it names the model, the tokens and the fallback —
+   * "未启用" is only the truth when the stage really did not run.
+   */
+  private modelLines(report: ConsolidationReport): string[] {
+    const model = report.model
+    if (model === undefined) return ['模型提炼：未启用（确定性整理）']
+    if (model.skippedReason !== undefined) return [`模型提炼：未执行（${model.skippedReason}）`]
+    if (model.used === undefined) return ['模型提炼：未执行']
+    const lines = [
+      `模型提炼：${model.used}${model.tokens !== undefined && model.tokens > 0 ? `（${model.tokens} token）` : ''} · 应用 ${model.applied ?? 0} 条`,
+    ]
+    if (model.fellBackFrom !== undefined) {
+      lines.push(`自选模型 ${model.fellBackFrom} 失败，已回退到 ${model.used}`)
+    }
+    for (const failure of model.failures ?? []) lines.push(`候选失败：${failure}`)
+    for (const rejection of model.rejected ?? []) lines.push(`被拒绝：${rejection}`)
     return lines
   }
 }

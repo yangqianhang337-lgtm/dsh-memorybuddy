@@ -5,6 +5,66 @@
 > 说明：0.1.0 一节保留发布当时的原文（那时本项目尚未正式命名），其中出现的旧名与旧工具名
 > 是当时的事实记录，不再改写；改名本身记录在 0.2.0 一节。
 
+## [0.4.0] - 2026-10-16
+
+**P5 模型提炼**：确定性整理（扫描、去重、重建索引）之后，第一次接上模型阶段——把候选交给模型做
+「提炼」（改写、补充、归纳），失败自动回退、按类别冷却，全程只发摘要不发原始对话。
+
+### 新增
+
+- **模型阶段接入整理** `src/host/distill.ts`：单次调用 45 秒上限、整轮 60 秒总预算、每轮最多 2 个候选、
+  `temperature: 0`、输入上限 16 KB（超长按行边界截断）。输出必须是 `{"ops":[…]}` JSON diff
+  （只允许 add / update），`update` 需要条目 id + **逐字锚点**，锚点不匹配、条目不存在、条目被 `pinned`
+  都会被拒绝并上浮为待确认问题；与现有条目相似度 ≥0.99 的改写视为无操作丢弃。
+  模型阶段排在确定性合并**之后**：确定性已合并的候选模型只能在其基础上改写，`applied: 0` 是正常结果，
+  不再因此打扰用户。
+- **候选链与自选模型** `src/host/model-picker.ts`：优先级 用户自选 → 免费档（读
+  `$DSH_HOME/.workbuddy-catalog.json` / `.workbuddy-ai-catalog.json` 的 `billing.free === true` 或
+  `credits === 'x0.00'`，按 `(provider, id)` 配对）→ 第三方（`sensenova` / `qwen`）→ 会话默认
+  （`ctx.agentDefaultModel.currentSelection()`，只读，绝不调 `saveSelection()`）→ 任意可用。
+  `modelPolicy: 'off'` 压过自选；`modelAllowlist` 非空是**硬边界**，自选也受约束；
+  免费档与运行时枚举取交集，避免撞上运行时根本路由不了的池账号。
+- **冷却表**：失败按类别写 `state.json.modelCooldown`——额度 6h / 模型不存在 24h / 认证失败 24h /
+  网络 30min / 未知 30min。**键只按路由 `provider/model` 建**，自选与候选链共用同一张表，
+  同一个模型不会被连撞两次；成功即清除。
+- **`GET /api/memorybuddy/models`**：下拉框的真实枚举（`llm.listProviders()` + `listModels()`），
+  宿主侧缓存 10 分钟、监听 `llm/adapters-updated` 主动失效；`GET /api/memorybuddy/consolidate-status`
+  是轻量轮询目标（全量快照要重读所有文档并重算 sha1，不适合每 2 秒拉一次）。
+- **面板「提炼模型」卡片**：下拉选项 = `name（provider/id）· 免费`；选中即经 `llm.resolveModelInfo`
+  校验（可用 → 上下文窗口与思考档位；不可用 → 红字原因）；`modelChoiceEffort` 的选项来自该模型真实的
+  `reasoning.efforts`，不写死档位；`off` 置灰整卡；「加入白名单」按钮在自选越界时出现。
+  快照新增 `runtime` 块（`running` + 自选模型现状）——刻意**不落盘**，崩溃后 `running: true` 就是一句谎话。
+- 面板「整理时机」一行升级为完整的模型运行记录（`consolidation.model`）：用了哪个模型、多少 token、
+  是否回退、未执行原因。
+
+### 修复
+
+- **prepared 调用按解析后配置分发**：`prepareCall` 返回的是冻结的单次句柄，其 `stream()` 用
+  `callConfigEquals` 逐字段比对请求与**已解析**配置（默认 effort / maxTokens 已物化），
+  直接展开输入配置会报 `INVALID_PREPARED_CALL`。现在用 `{...handle.config, messages, system, signal}` 分发。
+- **消息内容必须是块数组**：DSH 适配器按 `message.content.some(…)` 走**类型化块**（`{type:'text', text}`），
+  传字符串会报 `content.some is not a function`（UNKNOWN）。构造输入改为块数组。
+- `state.json` 新增 `lastModelRun`：重启不丢失「上次哪个模型跑了、结果如何」这唯一的模型侧记录。
+- 调试可见性：插件日志在 `dsh web` 组合下有 stderr 镜像（原 logger 无落盘目标，模型失败的真实报错完全不可见）。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `npx tsc --noEmit -p tsconfig.json` | exit 0 |
+| `node tools/verify-bundle.mjs` | 10/10 |
+| `node tools/verify-client-factory.mjs` | 13/13 |
+| `node tools/verify-headless.mjs` | 11 passed, 0 failed |
+| `node tools/verify-host.mjs` | 49/49（七条路由断言） |
+| `node tools/verify-schedule.mjs` | 14/14 |
+| `node tools/verify-model.mjs`（新增） | **30/30**（预算、冷却、白名单、隐私、块数组消息等） |
+| `node tools/verify-replay.mjs`（已结束的真实会话日志） | 14/14 |
+
+真机验证：影子实例（独立 `DSH_HOME` + `.credentials.yaml`，端口 19411）实测全链路——
+真实模型调用成功（`deepseek-account/deepseek-flash`，322–470 token），候选经确定性合并后模型按预期返回
+空 diff（`应用 0 条`），冷却表只出现单层键，`off` / 自选 / 空闲轮次的面板文案均正确；
+`MISSING_CREDENTIAL` 被正确归类为 `auth` 并写 24h 冷却。
+
 ## [0.3.0] - 2026-10-16
 
 **P4 自动整合闭环**：整合不再只靠手点。四个触发（启动补齐 / 空闲 / 会话结束 / 固定时间）真正接上了，

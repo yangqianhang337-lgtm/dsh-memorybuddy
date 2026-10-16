@@ -29,11 +29,15 @@ import type { MemoryStore as MemoryStoreType } from './host/store.ts'
 import type { Entry } from './host/entries.ts'
 import type { EventLike, SessionLike } from './host/collector.ts'
 import type { PreferencesView } from './protocol.ts'
+import type { ModelCatalog, ModelChoiceStatus, RuntimeView } from './protocol.ts'
 import { TOPICS } from './protocol.ts'
 import { SessionCollector } from './host/collector.ts'
 import { Consolidator } from './host/consolidate.ts'
+import { Distiller } from './host/distill.ts'
 import { dayKey, entryId } from './host/entries.ts'
 import { mountOnce } from './host/mount-once.ts'
+import { ModelPicker, COOLDOWN_MINUTES, allows, routeKey } from './host/model-picker.ts'
+import type { LlmLike, ModelRoute } from './host/model-picker.ts'
 import { PromptCache, SECTION_NAME, SECTION_ORDER } from './host/prompt.ts'
 import { memoryRoutes } from './host/routes.ts'
 import { ConsolidationScheduler } from './host/schedule.ts'
@@ -140,6 +144,18 @@ interface CommandsLike {
   register(definition: unknown): unknown
 }
 
+/**
+ * The `agentDefaultModel` service, read-only.
+ *
+ * `currentSelection()` returns a detached `{provider, model, reasoningEffort?}`
+ * for a newly created agent. `saveSelection()` is deliberately NOT part of this
+ * interface: this plugin must never rewrite the user's session default just
+ * because they picked a model for memory distillation.
+ */
+interface AgentDefaultModelLike {
+  currentSelection?: () => { provider?: string; model?: string } | undefined
+}
+
 /** The host context, narrowed to what this plugin calls. */
 interface HostContext {
   effect?(callback: () => unknown, label?: string): unknown
@@ -225,6 +241,15 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
     } catch {
       // A capture-only logger must never take the plugin down.
     }
+    // The CLI web run never flushes `ctx.logger` anywhere readable, and a model
+    // failure you cannot see is undiagnosable (the journal only stores the
+    // classified kind). stderr is where the runtime's own warnings go, so the
+    // plugin's follow them.
+    try {
+      console.error(`${PACKAGE_NAME}: ${message}`)
+    } catch {
+      // stdout/stderr closed (a detached GUI run) — nothing to do.
+    }
   }
 
   const store = new MemoryStore()
@@ -246,6 +271,99 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
     },
   })
   const consolidator = new Consolidator(store, log)
+
+  /* -------------------------------------------------------------- *
+   * The model stage (memorybuddy-plan §4)
+   * -------------------------------------------------------------- */
+
+  const picker = new ModelPicker()
+
+  /**
+   * The candidate chain for one pass, resolved fresh every time.
+   *
+   * It re-reads preferences (the user may have picked a model since the last
+   * pass), the cooldown table (which the previous pass just wrote) and the
+   * runtime's advertised models. Any failure degrades to "no chain", which the
+   * distiller reports as a skip rather than an error.
+   */
+  const resolveChain = async (): Promise<{
+    llm: LlmLike | undefined
+    chain: ModelRoute[]
+    skippedReason?: string
+  }> => {
+    const llm = service<LlmLike>('llm')
+    const view = preferences ?? DEFAULT_PREFERENCES_VIEW
+    const state = await store.readState()
+    let available: { provider: string; id: string }[] = []
+    if (llm?.listProviders !== undefined) {
+      try {
+        const providers = llm.listProviders() ?? []
+        if (llm.listModels !== undefined) {
+          const catalogue = await picker.catalog(llm)
+          available = catalogue.models.map(option => ({ provider: option.provider, id: option.id }))
+        } else {
+          available = providers.map(provider => ({ provider: provider.id, id: '' })).filter(item => item.id !== '')
+        }
+      } catch {
+        available = []
+      }
+    }
+    const sessionDefault = (() => {
+      try {
+        const selection = service<AgentDefaultModelLike>('agentDefaultModel')?.currentSelection?.()
+        if (selection?.provider === undefined || selection.model === undefined) return undefined
+        return { provider: selection.provider, model: selection.model }
+      } catch {
+        return undefined
+      }
+    })()
+    const resolved = await picker.chain({
+      preferences: view,
+      cooldown: state.modelCooldown,
+      llm,
+      available,
+      ...(sessionDefault === undefined ? {} : { sessionDefault }),
+    })
+    return {
+      llm,
+      chain: resolved.chain,
+      ...(resolved.skipped === undefined ? {} : { skippedReason: resolved.skipped }),
+    }
+  }
+
+  /**
+   * The distiller, whose cooldown writes go through `patchState`.
+   *
+   * Two rules live here rather than in `distill.ts`: the cooldown key is the
+   * route `provider/model` only (a `choice:` prefix would let the fallback chain
+   * hit the very model the pick just failed on), and a successful call clears
+   * the route's entry so a recovered model is not skipped for hours.
+   */
+  const distiller = new Distiller({
+    log,
+    routes: resolveChain,
+    cooldown: {
+      async record(provider, model, kind) {
+        const minutes = COOLDOWN_MINUTES[kind]
+        const until = Date.now() + minutes * 60_000
+        await store.patchState(current => ({
+          ...current,
+          modelCooldown: { ...current.modelCooldown, [routeKey(provider, model)]: until },
+        }))
+        log(`模型 ${routeKey(provider, model)} 进入冷却 ${minutes} 分钟（${kind}）`)
+      },
+      async clear(provider, model) {
+        const key = routeKey(provider, model)
+        await store.patchState(current => {
+          if (current.modelCooldown[key] === undefined) return current
+          const next = { ...current.modelCooldown }
+          delete next[key]
+          return { ...current, modelCooldown: next }
+        })
+      },
+    },
+  })
+  consolidator.setDistiller(distiller)
 
   let disposeSection: Disposer | undefined
   let disposeTools: Disposer | undefined
@@ -535,6 +653,43 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
       void refresh()
     },
     log,
+    /**
+     * Live facts, computed per request.
+     *
+     * `running` comes from the consolidator itself; the model pick is validated
+     * against the live registry so the card can say "这个模型现在解析不了"
+     * instead of failing on the next pass.
+     */
+    runtime: async (): Promise<RuntimeView> => {
+      const view = preferences ?? DEFAULT_PREFERENCES_VIEW
+      const llm = service<LlmLike>('llm')
+      const state = await store.readState()
+      const provider = view.modelChoiceProvider.trim()
+      const model = view.modelChoiceModel.trim()
+      const chosen = provider !== '' && model !== ''
+      const choice: ModelChoiceStatus = {
+        provider,
+        model,
+        chosen,
+        ok: false,
+        efforts: [],
+        blockedByAllowlist: chosen && !allows(view.modelAllowlist, provider, model),
+        cooling: chosen && picker.cooling(state, provider, model),
+        disabled: view.modelPolicy === 'off',
+      }
+      if (chosen && !choice.blockedByAllowlist) {
+        const checked = await picker.validate(llm, provider, model)
+        choice.ok = checked.ok
+        choice.efforts = checked.efforts
+        if (checked.reason !== undefined) choice.reason = checked.reason
+        if (checked.defaultEffort !== undefined) choice.defaultEffort = checked.defaultEffort
+        if (checked.contextWindow !== undefined) choice.contextWindow = checked.contextWindow
+      } else if (choice.blockedByAllowlist) {
+        choice.reason = '不在白名单里'
+      }
+      return { running: consolidator.busy, modelChoice: choice }
+    },
+    catalog: async (): Promise<ModelCatalog> => await picker.catalog(service<LlmLike>('llm')),
   })
 
   /**
@@ -667,6 +822,23 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
     setToolsEnabled(false)
     collector.forgetAll()
   }, `${PACKAGE_NAME}: prompt section and tools`)
+
+  /*
+   * The catalogue cache (L8): `listModels()` is async and may hit the network,
+   * so the enumeration is cached — which makes the cache's invalidation a
+   * correctness concern, not an optimisation. A user who plugs in a new API
+   * key must see its models, and the runtime announces exactly that moment:
+   * `LlmRuntime.emitAdaptersUpdated()` dispatches `'llm/adapters-updated'` at
+   * every adapter register / dispose / replace commit point. Without this
+   * subscription the dropdown would keep showing the previous composition for
+   * up to `CATALOG_TTL_MS` after the user fixed their credentials.
+   */
+  ctx.effect?.(() => {
+    const handle = ctx.on?.('llm/adapters-updated', () => picker.invalidate())
+    return () => {
+      if (typeof handle === 'function') (handle as () => void)()
+    }
+  }, `${PACKAGE_NAME}: model catalogue invalidation`)
 
   // `/memory` is the escape hatch for a user who is not looking at the panel.
   try {
