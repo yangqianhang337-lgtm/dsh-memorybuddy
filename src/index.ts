@@ -36,10 +36,25 @@ import { dayKey, entryId } from './host/entries.ts'
 import { mountOnce } from './host/mount-once.ts'
 import { PromptCache, SECTION_NAME, SECTION_ORDER } from './host/prompt.ts'
 import { memoryRoutes } from './host/routes.ts'
+import { ConsolidationScheduler } from './host/schedule.ts'
 import { MemoryStore, redact } from './host/store.ts'
+import { DEFAULT_PREFERENCES } from './host/templates.ts'
 
 /** The package name, used as the mount guard's seat and the log prefix. */
 const PACKAGE_NAME = 'dsh-memorybuddy'
+
+/**
+ * The preferences a fresh install has.
+ *
+ * The scheduler reads preferences on a timer, and its first tick can beat the
+ * asynchronous `refresh()` that loads them. Falling back to the shipped
+ * defaults keeps that race harmless: the worst case is one tick that behaves
+ * like a fresh install, and the next one sees the real file.
+ */
+const DEFAULT_PREFERENCES_VIEW: PreferencesView = {
+  ...DEFAULT_PREFERENCES,
+  modelAllowlist: [...DEFAULT_PREFERENCES.modelAllowlist],
+}
 
 /**
  * Services the host half cannot work without.
@@ -522,6 +537,31 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
     log,
   })
 
+  /**
+   * The trigger scheduler (memory-plan §6.1).
+   *
+   * Its whole input is `preferences` (re-read live, so flipping a switch in the
+   * panel takes effect on the next tick) plus the activity clock the session
+   * subscription below keeps. The scheduler never touches a memory file: it only
+   * decides *when* to ask the consolidator for a pass.
+   */
+  const scheduler = new ConsolidationScheduler({
+    store: store as unknown as MemoryStoreType,
+    consolidator,
+    preferences: () => preferences ?? DEFAULT_PREFERENCES_VIEW,
+    log,
+    onRun: () => {
+      void refresh()
+    },
+  })
+
+  ctx.effect?.(() => {
+    scheduler.start()
+    return () => {
+      scheduler.stop()
+    }
+  }, `${PACKAGE_NAME}: consolidation scheduler`)
+
   ctx.effect?.(() => {
     const disposers: Disposer[] = []
     let torn = false
@@ -593,13 +633,16 @@ const applyImpl = mountOnce(PACKAGE_NAME, (ctx: HostContext): void => {
       if (typeof handle === 'function') disposers.push(handle as Disposer)
     }
     subscribe('session/event', (session: SessionLike, event: EventLike) => {
+      scheduler.touch()
       collector.observe(session, event)
     })
     subscribe('session/flush', (session: SessionLike) => {
       void collector.flush(session)
+      scheduler.sessionEnded()
     })
     subscribe('session/disposed', (session: SessionLike) => {
       void collector.dispose(session)
+      scheduler.sessionEnded()
     })
     // Sessions that were already live when the plugin loaded still need notes.
     try {

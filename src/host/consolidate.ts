@@ -151,7 +151,7 @@ export class Consolidator {
     try {
       await this.runInner(report, limit)
     } catch (error) {
-      this.log(`memorybuddy: 整理失败：${String(error)}`)
+      this.log(`整理失败：${String(error)}`)
       report.questions.push(`整理过程中出错：${String(error)}`)
     } finally {
       this.running = false
@@ -225,12 +225,31 @@ export class Consolidator {
     if (consumed.length > 0 || changedTopics.length > 0) {
       await this.store.appendJournal(this.journalLines(report, consumed, changedTopics))
     }
-    const nextState: PluginState = {
-      ...state,
-      pending: state.pending.filter(relative => !consumed.includes(relative)),
+    // `patchState` merges against the file as it is *now*: the collector may have
+    // added a note (and its watermark) while this pass was reading notes, and a
+    // blind overwrite would drop it — the note would be consolidated twice and
+    // the watermark rolled back.
+    await this.store.patchState(current => ({
+      ...current,
+      pending: current.pending.filter(relative => !consumed.includes(relative)),
       lastConsolidateAt: report.at,
+      questions: this.mergeQuestions(current.questions, report.questions),
+    }))
+  }
+
+  /**
+   * Keep the unanswered questions in `state.json` for the panel.
+   *
+   * A pass re-raises the same conflict every time it sees the same pair, so the
+   * new list replaces the old one instead of growing without bound; the union
+   * keeps a question raised by a *different* topic alive.
+   */
+  private mergeQuestions(existing: readonly string[], raised: readonly string[]): string[] {
+    const next = [...raised]
+    for (const question of existing) {
+      if (!next.includes(question)) next.push(question)
     }
-    await this.store.writeState(nextState)
+    return next.slice(0, 50)
   }
 
   /**

@@ -26,6 +26,7 @@ import {
   ensureDir,
   exists,
   listDir,
+  movePath,
   mtimeIso,
   readText,
   readTextOrUndefined,
@@ -54,6 +55,7 @@ import {
   type DocumentView,
   type DraftView,
   type EntryView,
+  type JournalView,
   type MemorySnapshot,
   type ModelPolicy,
   type PreferencesPatch,
@@ -75,6 +77,12 @@ export interface PluginState {
   modelCooldown: Record<string, number>
   /** Per-entry corroboration bookkeeping that cannot live in the markdown. */
   confidence: Record<string, { days: number; first: string; last: string }>
+  /**
+   * Questions a pass raised and the user has not answered yet (memory-plan
+   * §5.3). They live here rather than only in the journal because the panel has
+   * to surface them: a conflict the user never sees is a conflict never fixed.
+   */
+  questions: string[]
 }
 
 const EMPTY_STATE: PluginState = {
@@ -84,6 +92,7 @@ const EMPTY_STATE: PluginState = {
   lastConsolidateAt: null,
   modelCooldown: {},
   confidence: {},
+  questions: [],
 }
 
 /** Secrets the blacklist drops outright (memory-plan §5.2). */
@@ -174,6 +183,7 @@ export class MemoryStore {
         lastConsolidateAt: parsed.lastConsolidateAt ?? null,
         modelCooldown: parsed.modelCooldown ?? {},
         confidence: parsed.confidence ?? {},
+        questions: Array.isArray(parsed.questions) ? parsed.questions.filter(item => typeof item === 'string') : [],
       }
     } catch {
       // A corrupt state file must not take the plugin down: the watermark is
@@ -183,9 +193,56 @@ export class MemoryStore {
     }
   }
 
-  /** Persist `state.json`. */
+  /**
+   * Persist `state.json`.
+   *
+   * Under the file lock, because every caller is a read-modify-write: the
+   * collector reads, merges its watermark and writes; a consolidation pass does
+   * the same with `pending`. Without the lock the two interleave and the later
+   * writer silently reverts the other's field — a lost watermark means a session
+   * is consolidated twice, and the user sees nothing at all. The window used to
+   * be milliseconds wide, which is why it never bit; anything that awaits
+   * between the read and the write (a model call, a network request) widens it
+   * to seconds.
+   */
   async writeState(state: PluginState): Promise<void> {
-    await writeFileAtomic(this.path('state.json'), `${JSON.stringify(state, null, 2)}\n`)
+    await withFileLock(this.path('state.json'), async () => {
+      await writeFileAtomic(this.path('state.json'), `${JSON.stringify(state, null, 2)}\n`)
+    })
+  }
+
+  /**
+   * Merge a patch into `state.json` under one lock.
+   *
+   * `patch` receives the state as it is on disk *at this moment*, so two writers
+   * that touch different fields both survive. Prefer this over `readState` +
+   * `writeState` for any new caller.
+   */
+  async patchState(patch: (state: PluginState) => PluginState): Promise<PluginState> {
+    const target = this.path('state.json')
+    return await withFileLock(target, async () => {
+      const raw = await readTextOrUndefined(target)
+      let current: PluginState = { ...EMPTY_STATE }
+      if (raw !== undefined && raw.trim() !== '') {
+        try {
+          const parsed = JSON.parse(raw) as Partial<PluginState>
+          current = {
+            schema: typeof parsed.schema === 'number' ? parsed.schema : 1,
+            processed: parsed.processed ?? {},
+            pending: Array.isArray(parsed.pending) ? parsed.pending : [],
+            lastConsolidateAt: parsed.lastConsolidateAt ?? null,
+            modelCooldown: parsed.modelCooldown ?? {},
+            confidence: parsed.confidence ?? {},
+            questions: Array.isArray(parsed.questions) ? parsed.questions.filter(item => typeof item === 'string') : [],
+          }
+        } catch {
+          this.warnings.push('state.json 无法解析，已按空状态继续（记忆文件未受影响）。')
+        }
+      }
+      const next = patch(current)
+      await writeFileAtomic(target, `${JSON.stringify(next, null, 2)}\n`)
+      return next
+    })
   }
 
   /** Read one markdown document. */
@@ -289,7 +346,8 @@ export class MemoryStore {
   }
 
   /** Rewrite a document back to its shipped skeleton. */
-  async resetDocument(relative: string): Promise<void> {    const now = new Date().toISOString()
+  async resetDocument(relative: string): Promise<void> {
+    const now = new Date().toISOString()
     const target = documentTarget(relative)
     if (target === undefined) return
     const content =
@@ -437,13 +495,135 @@ export class MemoryStore {
 
   /** Back up the files a pass is about to rewrite. */
   async backup(paths: readonly string[]): Promise<void> {
-    const directory = this.path(`journal/${dayKey()}/backup`)
+    await this.backupInto(this.path(`journal/${dayKey()}/backup`), paths)
+  }
+
+  /** Copy `paths` into an already-chosen backup directory. */
+  private async backupInto(directory: string, paths: readonly string[]): Promise<string[]> {
     await ensureDir(directory)
+    const written: string[] = []
     for (const relative of paths) {
       const raw = await readTextOrUndefined(this.path(relative))
       if (raw === undefined) continue
       await writeFileAtomic(join(directory, relative.replaceAll('/', '__')), raw)
+      written.push(relative)
     }
+    return written
+  }
+
+  /** Journal dates that carry a backup, newest first. */
+  async readHistory(): Promise<string[]> {
+    const names = await listDir(this.path('journal'))
+    const dates: string[] = []
+    for (const name of names) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(name)) continue
+      if ((await listDir(this.path(`journal/${name}/backup`))).length > 0) dates.push(name)
+    }
+    return dates.sort().reverse()
+  }
+
+  /**
+   * Read one journal day: its log text and the files its backup can restore.
+   *
+   * The backup file names encode the original path with `/` → `__`, which is
+   * unambiguous because a Windows path cannot contain `/` and the memory layout
+   * never names a file with a double underscore.
+   */
+  async readJournal(date: string): Promise<JournalView> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { date, text: '', backups: [] }
+    const text = (await readTextOrUndefined(this.path(`journal/${date}.md`))) ?? ''
+    const backups = (await listDir(this.path(`journal/${date}/backup`))).map(name => name.replaceAll('__', '/')).sort()
+    return { date, text, backups }
+  }
+
+  /**
+   * Restore one journal day's backup over the live files.
+   *
+   * Three safety rules, all deliberate:
+   *
+   * 1. The backup is read into memory *before* anything is written. A rollback
+   *    to today would otherwise overwrite `journal/<today>/backup/` — the very
+   *    files it is about to restore from — and "restore" the damage instead.
+   * 2. The state being replaced is snapshotted into its own timestamped
+   *    directory, never into the backup it came from, so a day's original
+   *    backup survives and stays re-rollback-able.
+   * 3. A file that did not exist when the backup was taken is left alone rather
+   *    than deleted: the backup records what to put back, not what to remove,
+   *    and guessing the difference from the file list would delete memory that
+   *    was created after the pass.
+   */
+  async rollback(date: string): Promise<{ restored: string[]; date: string; snapshot: string }> {
+    const directory = this.path(`journal/${date}/backup`)
+    const names = await listDir(directory)
+    const targets = names
+      .map(name => ({ name, relative: name.replaceAll('__', '/') }))
+      // A path that escapes the data root would be a hand-edited backup file
+      // pointing somewhere it must never write.
+      .filter(item => item.relative !== '' && !item.relative.includes('..') && !item.relative.startsWith('/'))
+    if (targets.length === 0) return { restored: [], date, snapshot: '' }
+    // Rule 1: capture the bytes to restore before touching the disk.
+    const captured: { relative: string; raw: string }[] = []
+    for (const item of targets) {
+      const raw = await readTextOrUndefined(join(directory, item.name))
+      if (raw === undefined) continue
+      captured.push({ relative: item.relative, raw })
+    }
+    // Rule 2: a distinct directory, so the source backup stays intact.
+    const stamp = new Date().toISOString().slice(11, 19).replaceAll(':', '-')
+    const snapshot = `journal/${dayKey()}/rollback-${stamp}`
+    await this.backupInto(this.path(snapshot), captured.map(item => item.relative))
+    const restored: string[] = []
+    for (const item of captured) {
+      await writeFileAtomic(this.path(item.relative), item.raw)
+      restored.push(item.relative)
+    }
+    await this.appendJournal([
+      `已回滚到 ${date} 的备份：恢复 ${restored.length} 个文件（回滚前的状态已再次备份到 ${snapshot}/）`,
+    ])
+    return { restored, date, snapshot }
+  }
+
+  /**
+   * Archive the whole memory and rebuild the empty skeleton.
+   *
+   * The plan's 重置 (§6.3) is a move, never a delete: `memory/`, `sessions/`,
+   * `journal/` and the three hand-editable documents all move into
+   * `archive/reset-<timestamp>/`, so a reset that turns out to be a mistake is
+   * undone by dragging the directory back.
+   */
+  async resetAll(): Promise<{ archived: string; files: number }> {
+    const stamp = new Date().toISOString().replaceAll(':', '-').replace(/\.\d+Z$/, 'Z')
+    const directory = this.path(`archive/reset-${stamp}`)
+    await ensureDir(directory)
+    const moved: string[] = []
+    for (const relative of ['memory', 'sessions', 'journal', 'skills-draft', 'profile.md', 'instructions.md']) {
+      const source = this.path(relative)
+      if (!(await exists(source))) continue
+      const destination = join(directory, relative)
+      await ensureDir(join(destination, '..'))
+      await movePath(source, destination)
+      moved.push(relative)
+    }
+    // `state.json` is rewritten rather than moved: the archive keeps a copy for
+    // the record, and the live file must come back empty.
+    const raw = await readTextOrUndefined(this.path('state.json'))
+    if (raw !== undefined) await writeFileAtomic(join(directory, 'state.json'), raw)
+    await this.writeState({ ...EMPTY_STATE })
+    await this.ensure()
+    return { archived: `archive/reset-${stamp}`, files: moved.length }
+  }
+
+  /** Drop one unanswered question by index. */
+  async dismissQuestion(index: number): Promise<boolean> {
+    let removed = false
+    await this.patchState(state => {
+      if (index < 0 || index >= state.questions.length) return state
+      removed = true
+      const questions = [...state.questions]
+      questions.splice(index, 1)
+      return { ...state, questions }
+    })
+    return removed
   }
 
   /** Promote a draft into `$DSH_HOME/skills/<name>/SKILL.md`. */
@@ -513,9 +693,16 @@ export class MemoryStore {
       consolidation: {
         lastAt: state.lastConsolidateAt,
         reason: await this.consolidationReason(preferences),
-        modelStage: 'disabled',
-        modelNote: '模型提炼未启用（首版）',
+        // The deterministic stage is what actually runs today; the model stage
+        // upgrades this to `'model'` once P5 lands, and `modelNote` says which.
+        modelStage: state.lastConsolidateAt === null ? 'disabled' : 'deterministic',
+        modelNote:
+          state.lastConsolidateAt === null
+            ? '还没有整理过（模型提炼未启用）'
+            : '确定性整理已启用；模型提炼未启用',
       },
+      questions: [...state.questions],
+      history: await this.readHistory(),
       drafts,
       warnings: [...this.warnings],
     }

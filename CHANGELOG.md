@@ -5,6 +5,63 @@
 > 说明：0.1.0 一节保留发布当时的原文（那时本项目尚未正式命名），其中出现的旧名与旧工具名
 > 是当时的事实记录，不再改写；改名本身记录在 0.2.0 一节。
 
+## [0.3.0] - 2026-10-16
+
+**P4 自动整合闭环**：整合不再只靠手点。四个触发（启动补齐 / 空闲 / 会话结束 / 固定时间）真正接上了，
+整理结果（待确认问题、整理历史、一键回滚）第一次出现在面板里，而「重置」不再是重置一个索引文件，
+而是把全部记忆归档。
+
+### 新增
+
+- **触发调度器** `src/host/schedule.ts`：`consolidateOn` 的四个取值第一次真正生效。
+  - `startup-idle`（默认）：启动 90 秒后补一次 + 空闲 `consolidateIdleMinutes`（默认 10 分钟）触发一次。
+  - `idle`：只按空闲触发，不做启动补齐。
+  - `session-end`：会话结束（`session/flush` / `session/disposed`）后 15 秒防抖触发。
+  - `fixed`：每天到 `consolidateFixedTime`（默认 03:00）触发一次；默认关闭。
+  - 统一闸门：距上次整理 ≥ `consolidateIntervalHours`（默认 24 小时）**且**有待整理的会话笔记；
+    单次最多 20 个；`conversationMemory` 关闭时不触发。所有定时器挂在 `ctx.effect()` 上，热重载不留残留。
+- **待确认问题上浮**：整理过程中产生的冲突与「这条还成立吗」不再只写进日志，
+  `MemorySnapshot.questions` 把它们送到面板的「待你确认」卡片，可逐条「知道了」（`dismiss-question`）。
+- **整理历史与回滚**：新增 `GET /api/memorybuddy/journal?date=`，面板新增「整理历史」卡片
+  （查看当天日志 / 回滚到这一天）。回滚会把当前状态先备份到 `journal/<日期>/rollback-<时间>/`，
+  再把当天 `journal/<日期>/backup/` 里的文件写回去。
+- **「重置」改为归档全部**：`reset-all` 把 `memory/`、`sessions/`、`journal/`、`skills-draft/`、
+  `profile.md`、`instructions.md` 移入 `archive/reset-<时间戳>/` 并重建空骨架——**不删除任何文件**。
+- 面板「整理时机」一行改为显示宿主的真实阶段（`consolidation.modelNote`），而不是永远显示同一句占位文案。
+
+### 修复
+
+- **`state.json` 并发写入会丢数据**：`writeState()` 只做原子写、没有加锁，而整合与采集都是
+  「读—改—写」。此前窗口只有几毫秒，P4 加入模型阶段后窗口可达数十秒，期间任何一个会话的
+  水位线写入都会被整份覆盖（`processed` / `pending` 回退、会话被重复整理）。现在
+  `writeState()` 在 `withFileLock` 内写入，并新增 `patchState()` 供读改写使用；
+  采集的水位线与整合的 `pending` / `lastConsolidateAt` / `questions` 都改走它。
+- **回滚会吃掉自己的备份**：`rollback(date)` 把「回滚前的状态」备份进了它正要恢复的那个目录，
+  当回滚目标就是当天时，恢复出来的正是被改坏的内容——且没有任何报错。
+  现在改为**先把要恢复的字节读进内存**，再把被替换的状态快照到独立的
+  `journal/<日期>/rollback-<时间>/`，源备份保持原样、可以反复回滚。
+- 手动「立即整理」不再阻塞浏览器：动作立即返回 `202 {"started":true}`，面板改为轮询
+  （2 秒一次，最多 6 次）读取结果——此前一次带模型阶段的整理可能跑几十秒，
+  而浏览器请求 15 秒就超时，超时后 `Consolidator.running` 还会把后续触发全部拒掉。
+- 日志前缀重复：`collector.ts` / `consolidate.ts` / `routes.ts` 里的 `memorybuddy: ` 与
+  `src/index.ts` 已加的 `dsh-memorybuddy: ` 叠成双前缀，已去掉多余的一层。
+- `store.ts` 中 `resetDocument()` 的声明与首条语句挤在同一行，已拆开。
+
+### 验证
+
+| 命令 | 结果 |
+|---|---|
+| `npx tsc --noEmit -p tsconfig.json` | exit 0 |
+| `node tools/verify-bundle.mjs` | 10/10 |
+| `node tools/verify-client-factory.mjs` | 13/13 |
+| `node tools/verify-headless.mjs` | 11 passed, 0 failed |
+| `node tools/verify-host.mjs` | **49/49**（0.2.0 为 35/35） |
+| `node tools/verify-schedule.mjs`（新增） | 14/14 |
+| `node tools/verify-replay.mjs`（已结束的真实会话日志） | 14/14 |
+
+真机验证：用影子实例（独立 `DSH_HOME` + `--profile mbp4`，端口 19411）实测「启动补齐」在启动约
+90 秒后自行触发，写入 `journal/2026-10-16.md`、备份 5 个文件、`pending` 清空。
+
 ## [0.2.0] - 2026-10-16
 
 **重命名发布**：项目正式定名 **memorybuddy**，插件内所有属于本项目自身的 `workbuddy` 标识

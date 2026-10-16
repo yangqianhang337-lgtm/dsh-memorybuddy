@@ -28,6 +28,7 @@ import { registerMemoryBuddyPanel } from './panel.tsx'
 import { registerSettingsSections } from './sections.tsx'
 import { installPanelStyles } from './styles.ts'
 import { setActiveLocale, setRuntimeTranslate } from './t.ts'
+import type { JournalView } from '../protocol.ts'
 
 /** Required services: slot registration plus the translator. */
 export const inject = ['slots', 'locale']
@@ -138,6 +139,8 @@ function applyInner(ctx: ClientLike): void {
     onSaveDocument: (path: string, text: string, revision: string): Promise<boolean> =>
       controller.save(path, text, revision).then(outcome => outcome === 'saved'),
     onAction: (action: Record<string, unknown>): Promise<boolean> => controller.act(action),
+    onConsolidate: () => controller.consolidate(),
+    onJournal: (date: string) => controller.journal(date),
   }
 
   registerMemoryBuddyPanel(ctx as unknown as { slots: unknown }, face)

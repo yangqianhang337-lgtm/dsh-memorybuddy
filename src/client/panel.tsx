@@ -114,6 +114,8 @@ export function MemoryBuddyPanel({ face }: { face: MemoryFace }): ReactNode {
           onPatch={face.onPatch}
           onSaveDocument={face.onSaveDocument}
           onAction={face.onAction}
+          onConsolidate={face.onConsolidate}
+          onJournal={face.onJournal}
         />
       )}
     </div>

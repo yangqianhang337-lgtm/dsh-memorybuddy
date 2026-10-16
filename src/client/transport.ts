@@ -14,6 +14,7 @@ import { API_PREFIX } from '../protocol'
 import type {
   DocumentView,
   EntryView,
+  JournalView,
   MemorySnapshot,
   SessionNoteView,
   DraftView,
@@ -133,7 +134,7 @@ export class MemoryApi {
     return asSnapshot(value?.snapshot)
   }
 
-  /** Run one of the panel's actions (consolidate, reset, forget, approve…). */
+  /** Run one of the panel's actions (reset, forget, pin, approve…). */
   async action(action: Record<string, unknown>): Promise<MemorySnapshot> {
     const value = (await request(`${CLIENT_PREFIX}/action`, {
       method: 'POST',
@@ -142,6 +143,40 @@ export class MemoryApi {
     })) as { snapshot?: unknown }
     return asSnapshot(value?.snapshot)
   }
+
+  /**
+   * Ask for a consolidation pass.
+   *
+   * Unlike `action()` this returns the pass's own answer, because the host
+   * replies before the work finishes: the panel has to know whether a pass
+   * actually started, not what it produced.
+   */
+  async consolidate(): Promise<{ snapshot: MemorySnapshot; started: boolean; reason?: string }> {
+    const value = (await request(`${CLIENT_PREFIX}/action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: { kind: 'consolidate' } }),
+    })) as { snapshot?: unknown; result?: { started?: unknown; reason?: unknown } }
+    const reason = typeof value?.result?.reason === 'string' ? value.result.reason : undefined
+    return {
+      snapshot: asSnapshot(value?.snapshot),
+      started: value?.result?.started === true,
+      ...(reason === undefined ? {} : { reason }),
+    }
+  }
+
+  /** Read one journal day: its log text plus the files its backup can restore. */
+  async journal(date: string): Promise<JournalView> {
+    const value = (await request(
+      `${CLIENT_PREFIX}/journal?date=${encodeURIComponent(date)}`,
+      { cache: 'no-store' },
+    )) as { journal?: unknown }
+    const record = value?.journal as JournalView | undefined
+    if (record === undefined || typeof record.date !== 'string') {
+      throw new MemoryApiError('body', 'malformed-journal')
+    }
+    return { date: record.date, text: record.text ?? '', backups: record.backups ?? [] }
+  }
 }
 
 /** Convenience re-exports so the card components import one module. */
@@ -149,6 +184,7 @@ export type {
   DocumentView,
   DraftView,
   EntryView,
+  JournalView,
   MemorySnapshot,
   PreferencesView,
   SessionNoteView,

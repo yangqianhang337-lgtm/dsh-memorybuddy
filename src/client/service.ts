@@ -10,7 +10,7 @@
 
 import * as React from 'react'
 import { MemoryApi, MemoryApiError } from './transport'
-import type { MemorySnapshot, PreferencesView } from '../protocol'
+import type { JournalView, MemorySnapshot, PreferencesView } from '../protocol'
 
 /** What the panel needs to render, in one immutable value. */
 export interface MemoryView {
@@ -46,6 +46,15 @@ export interface MemoryFace {
   onSaveDocument: (path: string, text: string, revision: string) => Promise<boolean>
   /** Run one of the host's memory actions. */
   onAction: (action: Record<string, unknown>) => Promise<boolean>
+  /**
+   * Ask for a consolidation pass.
+   *
+   * Separate from `onAction` because the host answers before the pass finishes:
+   * the caller needs to know whether it started, not what it produced.
+   */
+  onConsolidate: () => Promise<{ started: boolean; reason?: string }>
+  /** Read one journal day, for the history view. */
+  onJournal: (date: string) => Promise<JournalView | undefined>
 }
 
 const EMPTY: MemoryView = {
@@ -56,10 +65,13 @@ const EMPTY: MemoryView = {
   busy: false,
 }
 
-export class MemoryController {  private readonly api = new MemoryApi()
+export class MemoryController {
+  private readonly api = new MemoryApi()
   private view: MemoryView = EMPTY
   private readonly listeners = new Set<Listener>()
   private disposed = false
+  /** Timer of the post-consolidation poll, when one is armed. */
+  private pollTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 
   /** The current value; stable between mutations so React can bail out. */
   get(): MemoryView {
@@ -78,6 +90,10 @@ export class MemoryController {  private readonly api = new MemoryApi()
   dispose(): void {
     this.disposed = true
     this.listeners.clear()
+    if (this.pollTimer !== undefined) {
+      globalThis.clearTimeout(this.pollTimer)
+      this.pollTimer = undefined
+    }
   }
 
   private set(patch: Partial<MemoryView>): void {
@@ -183,6 +199,59 @@ export class MemoryController {  private readonly api = new MemoryApi()
     } catch (error) {
       this.set({ busy: false, error: this.describe(error, 'save') })
       return false
+    }
+  }
+
+  /**
+   * Ask for a consolidation pass and then poll for its result.
+   *
+   * The host answers the request immediately (a model-stage pass can outlive the
+   * browser's 15 s timeout), so the panel cannot learn the outcome from the
+   * response. It re-reads the snapshot a few times instead, which is enough for
+   * the deterministic stage the plugin ships today and honest about the rest.
+   */
+  async consolidate(): Promise<{ started: boolean; reason?: string }> {
+    this.set({ busy: true })
+    let started = false
+    let reason: string | undefined
+    try {
+      const outcome = await this.api.consolidate()
+      this.set({ snapshot: outcome.snapshot, busy: false, error: undefined })
+      started = outcome.started
+      reason = outcome.reason
+    } catch (error) {
+      this.set({ busy: false, error: this.describe(error, 'save') })
+      return { started: false }
+    }
+    if (!started) return reason === undefined ? { started: false } : { started: false, reason }
+    this.armPoll()
+    return { started: true }
+  }
+
+  /** Re-read the snapshot until the pass stops changing it, or give up. */
+  private armPoll(): void {
+    if (this.pollTimer !== undefined) globalThis.clearTimeout(this.pollTimer)
+    let rounds = 0
+    const tick = async (): Promise<void> => {
+      if (this.disposed) return
+      rounds += 1
+      await this.load()
+      if (this.disposed || rounds >= 6) {
+        this.pollTimer = undefined
+        return
+      }
+      this.pollTimer = globalThis.setTimeout(() => void tick(), 2_000)
+    }
+    this.pollTimer = globalThis.setTimeout(() => void tick(), 1_500)
+  }
+
+  /** Read one journal day (log text plus the files its backup can restore). */
+  async journal(date: string): Promise<JournalView | undefined> {
+    try {
+      return await this.api.journal(date)
+    } catch (error) {
+      this.set({ error: this.describe(error, 'load') })
+      return undefined
     }
   }
 

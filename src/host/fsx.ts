@@ -95,6 +95,29 @@ export async function removeFile(path: string): Promise<void> {
   await rm(path, { force: true })
 }
 
+/**
+ * Move a file or directory, retried through the same transient Windows errors
+ * as `writeFileAtomic`.
+ *
+ * A directory move is how 重置 archives the whole memory; on Windows an indexer
+ * or an open handle makes that rename fail for a few milliseconds, and the plan
+ * promises a reset is reversible rather than a partial move.
+ */
+export async function movePath(from: string, to: string): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < RENAME_ATTEMPTS; attempt += 1) {
+    try {
+      await rename(from, to)
+      return
+    } catch (error) {
+      lastError = error
+      if (!hasCode(error, TRANSIENT)) throw error
+      await sleep(Math.min(LOCK_BACKOFF_MS * 2 ** attempt, LOCK_BACKOFF_MAX_MS))
+    }
+  }
+  throw lastError
+}
+
 /** True while the process that recorded `pid` is still alive. */
 function processAlive(pid: number): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false

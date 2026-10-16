@@ -19,7 +19,7 @@
  */
 
 import { TOPICS } from '../protocol.ts'
-import type { MemoryStore, PluginState } from './store.ts'
+import type { MemoryStore } from './store.ts'
 import { dayKey } from './entries.ts'
 
 /** How long a session may go quiet before its note is considered final. */
@@ -488,7 +488,7 @@ export class SessionCollector {
       await this.markPending(relative, state.seq)
       this.host.onNote?.(relative)
     } catch (error) {
-      this.host.log(`memorybuddy: 会话笔记写入失败（${state.id}）：${String(error)}`)
+      this.host.log(`会话笔记写入失败（${state.id}）：${String(error)}`)
     }
   }
 
@@ -558,13 +558,16 @@ export class SessionCollector {
 
   /** Record the note in `state.json` so a consolidation pass picks it up. */
   private async markPending(relative: string, seq: number): Promise<void> {
-    const store = this.host.store
-    const state: PluginState = await store.readState()
-    const processed = { ...state.processed }
-    // The watermark is monotonic: a late flush of an old buffer must not lower it.
-    if (seq >= (processed[this.keyFor(relative)] ?? 0)) processed[this.keyFor(relative)] = seq
-    const pending = state.pending.includes(relative) ? state.pending : [...state.pending, relative]
-    await store.writeState({ ...state, processed, pending })
+    // `patchState` rather than read + write: a consolidation pass holds the same
+    // read-modify-write window on this file, and losing either side means a
+    // session is consolidated twice or a watermark is rolled back.
+    await this.host.store.patchState(state => {
+      const processed = { ...state.processed }
+      // The watermark is monotonic: a late flush of an old buffer must not lower it.
+      if (seq >= (processed[this.keyFor(relative)] ?? 0)) processed[this.keyFor(relative)] = seq
+      const pending = state.pending.includes(relative) ? state.pending : [...state.pending, relative]
+      return { ...state, processed, pending }
+    })
   }
 
   /** The watermark key of one note. */

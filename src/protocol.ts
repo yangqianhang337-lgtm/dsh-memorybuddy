@@ -99,13 +99,26 @@ export interface MemorySnapshot {
   consolidation: {
     lastAt: string | null
     reason: string
-    /** The model stage is deliberately not implemented in the first release. */
-    modelStage: 'disabled'
+    /** Which stage the last pass reached. The model stage lands in P5. */
+    modelStage: 'disabled' | 'deterministic' | 'model'
     modelNote: string
   }
+  /** Unanswered questions a pass raised (conflicts, stale 高 entries). */
+  questions: string[]
+  /** Journal dates that have a backup, newest first — the rollback menu. */
+  history: string[]
   drafts: DraftView[]
   /** Non-fatal problems the panel should surface (e.g. a redacted secret). */
   warnings: string[]
+}
+
+/** One journal day, as the history view renders it. */
+export interface JournalView {
+  date: string
+  /** The journal markdown body, or `''` when only a backup exists. */
+  text: string
+  /** Root-relative files that day's backup can restore. */
+  backups: string[]
 }
 
 /** Preference fields, exactly the front-matter keys of `preferences.md`. */
@@ -147,8 +160,11 @@ export interface PreferencesPatch {
 export type MemoryAction =
   | { kind: 'consolidate' }
   | { kind: 'reset-document'; path: string }
+  | { kind: 'reset-all' }
   | { kind: 'forget-entry'; topic: string; id: string }
   | { kind: 'pin-entry'; topic: string; id: string; pinned: boolean }
+  | { kind: 'dismiss-question'; index: number }
+  | { kind: 'rollback'; date: string }
   | { kind: 'approve-draft'; name: string }
   | { kind: 'discard-draft'; name: string }
 

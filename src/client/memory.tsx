@@ -21,7 +21,7 @@ import {
   ToastHost,
   type Translate,
 } from './cards.tsx'
-import { CONSOLIDATE_MODES, TOPICS, type DraftView, type EntryView, type MemorySnapshot, type SessionNoteView } from '../protocol.ts'
+import { CONSOLIDATE_MODES, TOPICS, type DraftView, type EntryView, type JournalView, type MemorySnapshot, type SessionNoteView } from '../protocol.ts'
 import { cx, panelCss as css } from './styles.ts'
 
 export interface MemoryPageProps {
@@ -34,6 +34,10 @@ export interface MemoryPageProps {
   onPatch: (patch: Record<string, unknown>) => void
   onSaveDocument: (path: string, text: string, revision: string) => Promise<boolean>
   onAction: (action: Record<string, unknown>) => Promise<boolean>
+  /** Start a pass and poll for its result; resolves once it was accepted. */
+  onConsolidate: () => Promise<{ started: boolean; reason?: string }>
+  /** Read one journal day for the history view. */
+  onJournal: (date: string) => Promise<JournalView | undefined>
   /**
    * Render the page heading (title + schedule line). The first-level panel keeps
    * it because that drop has no nav label of ours; the Settings drop passes
@@ -114,6 +118,8 @@ export function MemoryPage({
   onPatch,
   onSaveDocument,
   onAction,
+  onConsolidate,
+  onJournal,
   heading = true,
   bare = false,
 }: MemoryPageProps): React.ReactElement {
@@ -125,6 +131,9 @@ export function MemoryPage({
   const [forget, setForget] = React.useState<{ topic: string; id: string } | undefined>(undefined)
   const [indexEditing, setIndexEditing] = React.useState(false)
   const [indexDraft, setIndexDraft] = React.useState('')
+  const [rollbackDate, setRollbackDate] = React.useState<string | undefined>(undefined)
+  const [journalDate, setJournalDate] = React.useState('')
+  const [journal, setJournal] = React.useState<JournalView | undefined>(undefined)
   const fileRef = React.useRef<HTMLInputElement | null>(null)
 
   const say = React.useCallback(
@@ -168,6 +177,8 @@ export function MemoryPage({
   }, [needle, snapshot])
 
   const drafts = snapshot?.drafts ?? []
+  const questions = snapshot?.questions ?? []
+  const history = snapshot?.history ?? []
 
   /** Flip one preference through the host; failures surface as a toast. */
   const patchPreference = React.useCallback(
@@ -178,15 +189,46 @@ export function MemoryPage({
   )
 
   const consolidate = React.useCallback(async (): Promise<void> => {
-    const ok = await onAction({ kind: 'consolidate' })
-    say(ok ? t('toast.consolidated') : t('toast.failed'), ok ? 'success' : 'danger')
-  }, [onAction, say, t])
+    const outcome = await onConsolidate()
+    if (!outcome.started) {
+      say(outcome.reason ?? t('toast.failed'), 'danger')
+      return
+    }
+    // The host answers before the pass finishes, so this is "accepted", not
+    // "done": the controller polls and the card updates itself.
+    say(t('toast.consolidating'), 'success')
+  }, [onConsolidate, say, t])
 
   const doReset = React.useCallback(async (): Promise<void> => {
     setResetOpen(false)
-    const ok = await onAction({ kind: 'reset-document', path: 'memory/index.md' })
-    say(ok ? t('toast.reset') : t('toast.failed'), ok ? 'success' : 'danger')
+    const ok = await onAction({ kind: 'reset-all' })
+    say(ok ? t('toast.resetAll') : t('toast.failed'), ok ? 'success' : 'danger')
   }, [onAction, say, t])
+
+  const dismissQuestion = React.useCallback(
+    async (index: number): Promise<void> => {
+      const ok = await onAction({ kind: 'dismiss-question', index })
+      say(ok ? t('toast.dismissed') : t('toast.failed'), ok ? 'success' : 'danger')
+    },
+    [onAction, say, t],
+  )
+
+  const openJournal = React.useCallback(
+    async (date: string): Promise<void> => {
+      setJournalDate(date)
+      setJournal(await onJournal(date))
+    },
+    [onJournal],
+  )
+
+  const doRollback = React.useCallback(async (): Promise<void> => {
+    const date = rollbackDate
+    setRollbackDate(undefined)
+    if (date === undefined) return
+    const ok = await onAction({ kind: 'rollback', date })
+    say(ok ? t('toast.rolledBack') : t('toast.failed'), ok ? 'success' : 'danger')
+    if (ok) setJournal(await onJournal(date))
+  }, [onJournal, onAction, rollbackDate, say, t])
 
   const doForget = React.useCallback(async (): Promise<void> => {
     const target = forget
@@ -271,6 +313,30 @@ export function MemoryPage({
             </Button>
           }
         />
+      )}
+
+      {/*
+        待你确认 (§5.3): a conflict or a stale 高 entry that a pass could not
+        resolve on its own. It is deliberately NOT a banner: a banner is about
+        something new, and these stay until the user answers them.
+      */}
+      {questions.length > 0 && (
+        <Card title={t('memory.questions')} description={t('memory.questionsHint')}>
+          <div className={cx(css.entries)}>
+            {questions.map((question, index) => (
+              <div className={css.entry} key={`${index}-${question}`}>
+                <div className={css.entryBody}>
+                  <div className={css.entryText}>{question}</div>
+                </div>
+                <div className={css.entryActions}>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void dismissQuestion(index)}>
+                    {t('action.dismiss')}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       {/*
@@ -364,6 +430,14 @@ export function MemoryPage({
             <Button size="sm" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
               {t('action.import')}
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || history.length === 0}
+              onClick={() => void openJournal(journalDate === '' ? history[0] ?? '' : journalDate)}
+            >
+              {t('action.history')}
+            </Button>
           </>
         }
       >
@@ -435,7 +509,66 @@ export function MemoryPage({
               onChange={next => patchPreference('consolidateQuiet', next)}
             />
           </Row>
-          <div className={css.note}>{t('memory.modelStage')}</div>
+          {/*
+            The host knows which stage actually ran; the locale string is only
+            the fallback for a snapshot that has not loaded yet.
+          */}
+          <div className={css.note}>{snapshot?.consolidation.modelNote ?? t('memory.modelStage')}</div>
+        </Card>
+      )}
+
+      {/*
+        整理历史 (§6.3): every pass backs up what it rewrites, so any pass can be
+        undone. The list is dates only — a day's log is fetched when the user
+        asks for it, because most of the time nobody does.
+      */}
+      {!bare && (
+        <Card title={t('memory.history')} description={t('memory.historyHint')}>
+          {history.length === 0 ? (
+            <div className={css.proseEmpty}>{t('memory.historyEmpty')}</div>
+          ) : (
+            <>
+              <div className={cx(css.entries)}>
+                {history.map(date => (
+                  <div className={css.entry} key={date}>
+                    <div className={css.entryBody}>
+                      <div className={css.entryText}>{date}</div>
+                    </div>
+                    <div className={css.entryActions}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => void openJournal(date)}
+                      >
+                        {journalDate === date ? t('memory.rollbackOpen') : t('action.history')}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={css.danger}
+                        disabled={busy}
+                        onClick={() => setRollbackDate(date)}
+                      >
+                        {t('memory.rollback')}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {journal !== undefined && journalDate !== '' && (
+                <div className={css.prose}>
+                  <div className={css.note}>
+                    {journalDate} · {t('memory.historyBackups', { count: String(journal.backups.length) })}
+                  </div>
+                  {journal.backups.length > 0 && (
+                    <div className={css.note}>{journal.backups.join(' · ')}</div>
+                  )}
+                  <div className={css.journalBody}>{journal.text.trim() === '' ? t('empty') : journal.text}</div>
+                </div>
+              )}
+            </>
+          )}
         </Card>
       )}
 
@@ -554,6 +687,15 @@ export function MemoryPage({
         cancelLabel={t('action.cancel')}
         onConfirm={() => void doForget()}
         onCancel={() => setForget(undefined)}
+      />
+      <Confirm
+        open={rollbackDate !== undefined}
+        title={t('confirm.rollback.title')}
+        body={`${t('confirm.rollback.body')}（${rollbackDate ?? ''}）`}
+        confirmLabel={t('confirm.rollback.ok')}
+        cancelLabel={t('action.cancel')}
+        onConfirm={() => void doRollback()}
+        onCancel={() => setRollbackDate(undefined)}
       />
 
       <ToastHost

@@ -91,6 +91,8 @@ const PANEL_CSS = [
   '.mbBanner{box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:10px 12px;border:.5px solid var(--dsw-alias-state-warn-primary);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);font-size:13px;line-height:20px}',
   '.mbDraft{display:flex;flex-direction:column;gap:6px;padding:12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2)}',
   '.mbDraftBody{max-height:180px;overflow-y:auto;font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary)}',
+  /* A journal day's log: same monospace body, taller, since a busy day is long. */
+  '.mbJournalBody{max-height:280px;overflow-y:auto;padding:8px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary)}',
 
   '.mbFooter{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}',
   /* Reference footer: one centred muted line with 隐私政策 as an inline link. */
@@ -148,6 +150,7 @@ export const panelCss = {
   banner: 'mbBanner',
   draft: 'mbDraft',
   draftBody: 'mbDraftBody',
+  journalBody: 'mbJournalBody',
   footer: 'mbFooter',
   footerCenter: 'mbFooterCenter',
   footerLink: 'mbFooterLink',

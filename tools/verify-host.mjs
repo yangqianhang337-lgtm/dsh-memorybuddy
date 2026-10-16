@@ -135,8 +135,8 @@ host.apply(ctx)
 
 record('apply() mounted', true, `inject = ${JSON.stringify(host.inject)}`)
 record(
-  'four routes registered',
-  routes.size === 4,
+  'five routes registered',
+  routes.size === 5,
   [...routes.keys()].join(', '),
 )
 record('/memory command registered', commands.some(c => c.name === 'memory'), commands.map(c => c.name).join(', ') || '(none)')
@@ -201,7 +201,10 @@ function response() {
 
 /** Invoke one registered route and wait for its response. */
 async function call(method, path, body) {
-  const key = [...routes.keys()].find(candidate => candidate.endsWith(` ${path}`))
+  // Routes are registered without their query string; the handler reads it back
+  // off `request.url`, exactly as the real server hands it over.
+  const lookup = path.split('?')[0]
+  const key = [...routes.keys()].find(candidate => candidate.endsWith(` ${lookup}`))
   if (key === undefined) throw new Error(`no route for ${path}`)
   const res = response()
   await routes.get(key).handler(request(method, path, body), res)
@@ -480,16 +483,127 @@ record('the switch off stops collection', leaked === false, leaked ? 'sess-test-
 
 /* --- consolidation --------------------------------------------------------- */
 
+// The action answers BEFORE the pass finishes (a model-stage pass can outlive
+// the browser's 15 s timeout), so the response only says "accepted"; the result
+// has to be read back from the memory tree.
 const consolidated = await call('POST', '/api/memorybuddy/action', { action: { kind: 'consolidate' } })
 record(
-  'manual consolidation runs',
-  consolidated.status === 200 && consolidated.body?.result?.report !== undefined,
-  JSON.stringify(consolidated.body?.result?.report ?? {}).slice(0, 120),
+  'manual consolidation is accepted immediately',
+  // 202, not 200: the pass is accepted, not finished.
+  consolidated.status === 202 && consolidated.body?.result?.started === true,
+  `status ${consolidated.status}, ${JSON.stringify(consolidated.body?.result ?? {})}`.slice(0, 120),
+)
+
+await settle(8)
+const journalDay = dayDirs[0] ?? new Date().toISOString().slice(0, 10)
+const journalText = memoryFile(`journal/${journalDay}.md`)
+record('consolidation wrote a journal entry', journalText !== undefined, 'journal present')
+
+// P4-4: the pass's own questions reach the panel through the snapshot.
+const stateAfter = await call('GET', '/api/memorybuddy/state', undefined)
+record(
+  'the snapshot carries the questions field',
+  Array.isArray(stateAfter.body?.questions),
+  `questions = ${JSON.stringify(stateAfter.body?.questions ?? null).slice(0, 80)}`,
 )
 record(
-  'consolidation wrote a journal entry',
-  (memoryFile(`journal/${dayDirs[0]}.md`) ?? memoryFile(`journal/${new Date().toISOString().slice(0, 10)}.md`)) !== undefined,
-  'journal present',
+  'the model stage reports deterministic, not disabled',
+  stateAfter.body?.consolidation?.modelStage === 'deterministic',
+  String(stateAfter.body?.consolidation?.modelStage),
+)
+record(
+  'the snapshot lists the day as rollback-able history',
+  Array.isArray(stateAfter.body?.history) && stateAfter.body.history.includes(journalDay),
+  JSON.stringify(stateAfter.body?.history ?? null),
+)
+
+/* --- P4-5: history + rollback ---------------------------------------------- */
+
+const journalRoute = await call('GET', `/api/memorybuddy/journal?date=${journalDay}`, undefined)
+record(
+  'GET /journal answers with the day and its backups',
+  journalRoute.status === 200 && journalRoute.body?.journal?.date === journalDay,
+  `status ${journalRoute.status}, backups ${journalRoute.body?.journal?.backups?.length ?? 'n/a'}`,
+)
+record(
+  'the journal route reports the files a rollback can restore',
+  Array.isArray(journalRoute.body?.journal?.backups) && journalRoute.body.journal.backups.length > 0,
+  JSON.stringify(journalRoute.body?.journal?.backups ?? null),
+)
+
+// P4-5: a rollback restores the backup AND backs up the state it replaced.
+const rolled = await call('POST', '/api/memorybuddy/action', { action: { kind: 'rollback', date: journalDay } })
+record(
+  'rollback runs and reports what it restored',
+  rolled.status === 200 && Array.isArray(rolled.body?.result?.restored),
+  JSON.stringify(rolled.body?.result ?? {}).slice(0, 120),
+)
+record(
+  'rollback itself is rollback-able (it backed up first)',
+  (memoryFile(`journal/${journalDay}.md`) ?? '').includes(`已回滚到 ${journalDay}`),
+  'journal records the rollback',
+)
+
+// P4-5 regression: a rollback must actually REMOVE the damage.
+//
+// The first draft asserted only the journal line, which is why it passed while
+// `rollback(date)` was quietly destroying its own source: it snapshotted the
+// replaced state into `journal/<today>/backup/` — the same directory it was
+// about to restore from whenever the target day IS today — so every "restored"
+// file was rewritten with the damaged bytes and the log line still looked fine.
+// Asserting the content, not the log, is the whole point of this check.
+const damaged = journalRoute.body?.journal?.backups?.[0]
+if (typeof damaged === 'string' && damaged !== '') {
+  const damagedPath = join(home, 'dsh-memorybuddy', damaged)
+  const pristine = readFileSync(damagedPath, 'utf8')
+  const marker = 'ROLLBACK_SHOULD_REMOVE_THIS_LINE'
+  writeFileSync(damagedPath, `${pristine}\n- ${marker}\n`, 'utf8')
+  record(
+    'the damage is really on disk before the rollback',
+    (memoryFile(damaged) ?? '').includes(marker),
+    damaged,
+  )
+
+  // Same-day rollback: the case that used to overwrite its own backup.
+  const undo = await call('POST', '/api/memorybuddy/action', { action: { kind: 'rollback', date: journalDay } })
+  record(
+    'a rollback to today actually removes the damage',
+    undo.status === 200 && !(memoryFile(damaged) ?? '').includes(marker),
+    `status ${undo.status}, ${damaged}`,
+  )
+  record(
+    'a rollback to today does not damage its own backup source',
+    !(readFileSync(join(home, 'dsh-memorybuddy', `journal/${journalDay}/backup`, damaged.replaceAll('/', '__')), 'utf8')).includes(marker),
+    `journal/${journalDay}/backup/${damaged.replaceAll('/', '__')}`,
+  )
+  record(
+    'a rollback keeps a snapshot of what it replaced, in its own directory',
+    typeof undo.body?.result?.snapshot === 'string'
+      && undo.body.result.snapshot.startsWith(`journal/${journalDay}/rollback-`)
+      && !undo.body.result.snapshot.endsWith('/backup'),
+    String(undo.body?.result?.snapshot),
+  )
+}
+
+/* --- P4-6: reset archives instead of deleting ------------------------------ */
+
+const beforeReset = memoryFile('preferences.md') !== undefined
+const reset = await call('POST', '/api/memorybuddy/action', { action: { kind: 'reset-all' } })
+record(
+  'reset-all archives everything and rebuilds the skeleton',
+  reset.status === 200 && typeof reset.body?.result?.archived === 'string' && beforeReset,
+  JSON.stringify(reset.body?.result ?? {}).slice(0, 160),
+)
+const archived = reset.body?.result?.archived
+record(
+  'reset-all really moved the old memory into archive/',
+  typeof archived === 'string' && existsSync(join(home, 'dsh-memorybuddy', archived, 'memory')),
+  String(archived),
+)
+record(
+  'reset-all left a working skeleton behind',
+  memoryFile('memory/index.md') !== undefined && memoryFile('preferences.md') !== undefined,
+  'skeleton rebuilt',
 )
 
 /* --- report ---------------------------------------------------------------- */

@@ -2,6 +2,8 @@
  * The HTTP surface: one prefix, five routes, and the same auth fence the
  * task-board plugin uses.
  *
+ * The five are `state`, `save`, `preferences`, `journal` and `action`.
+ *
  * The prefix is root-absolute (`/api/memorybuddy`) because the route table
  * matches on the request URL; the browser half builds its URLs from
  * `API_PREFIX.slice(1)` against the document base, because the GUI page is
@@ -142,6 +144,18 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
     },
     {
       kind: 'exact',
+      path: `${API_PREFIX}/journal`,
+      handler: async (request, response) => {
+        if (request.method !== 'GET') return writeJson(response, 405, { ok: false, error: 'method-not-allowed' })
+        if (!guard(request, response)) return
+        const url = new URL(request.url ?? '/', 'http://localhost')
+        const date = url.searchParams.get('date') ?? ''
+        const journal = await host.store.readJournal(date)
+        writeJson(response, 200, { ok: true, journal })
+      },
+    },
+    {
+      kind: 'exact',
       path: `${API_PREFIX}/action`,
       handler: async (request, response) => {
         if (request.method !== 'POST') return writeJson(response, 405, { ok: false, error: 'method-not-allowed' })
@@ -154,12 +168,35 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
         if (record === undefined || typeof record.kind !== 'string') {
           return writeJson(response, 400, { ok: false, error: 'invalid-action' })
         }
+        // Consolidation is the one action that can outlive the browser's 15s
+        // timeout (§4.4 规则 0). It answers immediately and reports through the
+        // snapshot the panel is already polling, so a slow pass reads as
+        // "整理中" instead of as a failed click.
+        if (record.kind === 'consolidate') {
+          const started = host.consolidator.busy ? false : true
+          if (started) {
+            void host.consolidator
+              .run('手动整理')
+              .then(report => {
+                host.onChanged()
+                host.log(`手动整理完成：新增 ${report.added} · 合并 ${report.merged} · 归档 ${report.archived}`)
+              })
+              .catch(error => {
+                host.log(`手动整理失败：${String(error)}`)
+              })
+          }
+          return writeJson(response, 202, {
+            ok: true,
+            result: { started, reason: started ? undefined : '上一次整理还在进行中' },
+            snapshot: await host.store.snapshot(),
+          })
+        }
         try {
           const result = await runAction(host, record as unknown as MemoryAction)
           host.onChanged()
           writeJson(response, 200, { ok: true, result, snapshot: await host.store.snapshot() })
         } catch (error) {
-          host.log(`memorybuddy: 动作失败：${String(error)}`)
+          host.log(`动作失败：${String(error)}`)
           writeJson(response, 500, { ok: false, error: String(error) })
         }
       },
@@ -170,17 +207,19 @@ export function memoryRoutes(host: RoutesHost): WebRoute[] {
 /** Run one panel action. */
 async function runAction(host: RoutesHost, action: MemoryAction): Promise<unknown> {
   switch (action.kind) {
-    case 'consolidate': {
-      const report = await host.consolidator.run('手动整理')
-      return { report }
-    }
     case 'reset-document':
       await host.store.resetDocument(action.path)
       return { path: action.path }
+    case 'reset-all':
+      return await host.store.resetAll()
     case 'forget-entry':
       return { removed: await host.store.editEntry(action.topic as never, action.id, { remove: true }) }
     case 'pin-entry':
       return { pinned: await host.store.editEntry(action.topic as never, action.id, { pinned: action.pinned }) }
+    case 'dismiss-question':
+      return { dismissed: await host.store.dismissQuestion(action.index) }
+    case 'rollback':
+      return await host.store.rollback(action.date)
     case 'approve-draft':
       return { approved: await host.store.approveDraft(action.name) }
     case 'discard-draft':

@@ -55,6 +55,14 @@ export interface Dictionary {
   'memory.never': string
   'memory.pending': string
   'memory.modelStage': string
+  'memory.questions': string
+  'memory.questionsHint': string
+  'memory.history': string
+  'memory.historyHint': string
+  'memory.historyEmpty': string
+  'memory.historyBackups': string
+  'memory.rollback': string
+  'memory.rollbackOpen': string
   'memory.entriesHint': string
   'memory.footerLead': string
   'memory.privacyPolicy': string
@@ -99,13 +107,19 @@ export interface Dictionary {
   'action.discard': string
   'action.retry': string
   'action.reload': string
+  'action.history': string
+  'action.dismiss': string
 
   /* Feedback */
   'toast.saved': string
   'toast.failed': string
   'toast.imported': string
   'toast.consolidated': string
+  'toast.consolidating': string
   'toast.reset': string
+  'toast.resetAll': string
+  'toast.rolledBack': string
+  'toast.dismissed': string
   'toast.forgotten': string
   'toast.approved': string
   'toast.discarded': string
@@ -116,6 +130,9 @@ export interface Dictionary {
   'confirm.forget.title': string
   'confirm.forget.body': string
   'confirm.forget.ok': string
+  'confirm.rollback.title': string
+  'confirm.rollback.body': string
+  'confirm.rollback.ok': string
   'conflict.title': string
   'conflict.body': string
   'conflict.keepMine': string
@@ -179,6 +196,14 @@ const zh: Dictionary = {
   'memory.never': '（还没有整理过）',
   'memory.pending': '{count} 个会话待整理',
   'memory.modelStage': '模型提炼未启用（首版）',
+  'memory.questions': '待你确认',
+  'memory.questionsHint': '整理时发现这几处互相矛盾或久未更新，处理完请点「知道了」。',
+  'memory.history': '整理历史',
+  'memory.historyHint': '每天第一次整理前会先备份；回滚会把当天的备份写回，回滚前的状态也会再备份一次。',
+  'memory.historyEmpty': '还没有可回滚的备份。',
+  'memory.historyBackups': '{count} 个文件',
+  'memory.rollback': '回滚到这一天',
+  'memory.rollbackOpen': '查看当天日志',
   'memory.entriesHint': '只在服务端记下条目；内容始终以 markdown 文件为准。',
   'memory.footerLead': '记忆内容遵循 ',
   'memory.privacyPolicy': 'MemoryBuddy 隐私政策',
@@ -222,22 +247,31 @@ const zh: Dictionary = {
   'action.discard': '丢弃',
   'action.retry': '重试',
   'action.reload': '重新加载',
+  'action.history': '历史',
+  'action.dismiss': '知道了',
 
   'toast.saved': '已保存',
   'toast.failed': '保存失败',
   'toast.imported': '已导入并合并',
   'toast.consolidated': '整理完成',
+  'toast.consolidating': '已开始整理，稍后刷新查看结果',
   'toast.reset': '已重置',
+  'toast.resetAll': '全部记忆已移入 archive/，骨架已重建',
+  'toast.rolledBack': '已回滚',
+  'toast.dismissed': '已标记为知道',
   'toast.forgotten': '已移入 archive/',
   'toast.approved': '已批准并写入技能目录',
   'toast.discarded': '已丢弃草稿',
   'toast.pathCopied': '记忆目录路径已复制到剪贴板',
   'confirm.reset.title': '重置长期记忆？',
-  'confirm.reset.body': '当前内容会先归档到 journal/ 下的备份目录，然后重建为空骨架。',
-  'confirm.reset.ok': '重置',
+  'confirm.reset.body': '全部记忆（memory/、sessions/、journal/、人设与指令）会移入 archive/reset-<时间戳>/，不会删除。确认重置？',
+  'confirm.reset.ok': '归档并重置',
   'confirm.forget.title': '遗忘这条记忆？',
   'confirm.forget.body': '条目会被移入 archive/，可以人工恢复。',
   'confirm.forget.ok': '遗忘',
+  'confirm.rollback.title': '回滚到这一天的备份？',
+  'confirm.rollback.body': '当天备份覆盖的文件会被写回，回滚前的当前状态会先再备份一次。',
+  'confirm.rollback.ok': '回滚',
   'conflict.title': '这份内容在别处被改过',
   'conflict.body': '你的编辑没有丢：选择保留哪一份，或取消后手工合并。',
   'conflict.keepMine': '用我的覆盖',
@@ -299,6 +333,14 @@ const en: Dictionary = {
   'memory.never': '(never run yet)',
   'memory.pending': '{count} sessions waiting',
   'memory.modelStage': 'Model distillation is off (first release)',
+  'memory.questions': 'Waiting for your answer',
+  'memory.questionsHint': 'A pass found these contradictory or stale; dismiss each one once you have handled it.',
+  'memory.history': 'Consolidation history',
+  'memory.historyHint': 'Every pass backs up what it rewrites first; a rollback writes that day back and backs up the current state in turn.',
+  'memory.historyEmpty': 'No backups to roll back to yet.',
+  'memory.historyBackups': '{count} files',
+  'memory.rollback': 'Roll back to this day',
+  'memory.rollbackOpen': 'View that day',
   'memory.entriesHint': 'Entries are recorded on the server side; the markdown files stay the source of truth.',
   'memory.footerLead': 'Memory follows the ',
   'memory.privacyPolicy': 'MemoryBuddy privacy policy',
@@ -342,22 +384,33 @@ const en: Dictionary = {
   'action.discard': 'Discard',
   'action.retry': 'Retry',
   'action.reload': 'Reload',
+  'action.history': 'History',
+  'action.dismiss': 'Got it',
 
   'toast.saved': 'Saved',
   'toast.failed': 'Could not save',
   'toast.imported': 'Imported and merged',
   'toast.consolidated': 'Consolidation finished',
+  'toast.consolidating': 'Consolidation started; refresh shortly for the result',
   'toast.reset': 'Reset',
+  'toast.resetAll': 'All memory moved to archive/ and the skeleton rebuilt',
+  'toast.rolledBack': 'Rolled back',
+  'toast.dismissed': 'Marked as handled',
   'toast.forgotten': 'Moved to archive/',
   'toast.approved': 'Approved and written to the skills folder',
   'toast.discarded': 'Draft discarded',
   'toast.pathCopied': 'Memory folder path copied to the clipboard',
   'confirm.reset.title': 'Reset long-term memory?',
-  'confirm.reset.body': 'The current content is archived under journal/ first, then the skeleton is rebuilt.',
-  'confirm.reset.ok': 'Reset',
+  'confirm.reset.body':
+    'All memory (memory/, sessions/, journal/, persona and instructions) moves to archive/reset-<timestamp>/ — nothing is deleted. Reset?',
+  'confirm.reset.ok': 'Archive and reset',
   'confirm.forget.title': 'Forget this memory?',
   'confirm.forget.body': 'The entry moves to archive/ and can be restored by hand.',
   'confirm.forget.ok': 'Forget',
+  'confirm.rollback.title': 'Roll back to that day?',
+  'confirm.rollback.body':
+    'Files covered by that day’s backup are written back, and the current state is backed up first.',
+  'confirm.rollback.ok': 'Roll back',
   'conflict.title': 'This content changed elsewhere',
   'conflict.body': 'Your edit is not lost: keep one version, or cancel and merge by hand.',
   'conflict.keepMine': 'Overwrite with mine',
