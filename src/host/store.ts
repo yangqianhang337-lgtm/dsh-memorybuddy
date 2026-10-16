@@ -61,6 +61,7 @@ import {
   type ModelRunView,
   type PreferencesPatch,
   type PreferencesView,
+  type ProjectView,
   type ReplyStyle,
   type SessionNoteView,
   type TopicKey,
@@ -452,6 +453,65 @@ export class MemoryStore {
     return moved.length
   }
 
+  /* -------------------------------------------------------------- *
+   * Project memory (P6, memorybuddy-plan §5): the same entry format
+   * as a topic file, one file per workspace under memory/projects/.
+   * -------------------------------------------------------------- */
+
+  /** Every entry of one project file. Missing file = no entries. */
+  async readProjectEntries(slug: string): Promise<Entry[]> {
+    const document = await this.readDocument(`memory/projects/${slug}.md`)
+    if (document.body.trim() === '' && Object.keys(document.front).length === 0) return []
+    return parseEntries(document.body)
+  }
+
+  /** Rewrite one project file from its entries, creating it when absent. */
+  async writeProjectEntries(slug: string, entries: EntryView[]): Promise<void> {
+    const relative = `memory/projects/${slug}.md`
+    await withFileLock(this.path(relative), async () => {
+      const document = await this.readDocument(relative)
+      const body = renderTopicBody(document.body, entries)
+      const front = Object.keys(document.front).length === 0
+        ? { kind: 'project-memory', slug, schema: 1 }
+        : document.front
+      const next = { ...front, updated: new Date().toISOString() }
+      await writeFileAtomic(this.path(relative), renderDocument(next, body))
+    })
+  }
+
+  /** Every project file the panel can show, newest-updated first. */
+  async readProjects(): Promise<ProjectView[]> {
+    const names = await listDir(this.path('memory/projects'))
+    const projects: ProjectView[] = []
+    for (const name of names) {
+      if (!name.endsWith('.md')) continue
+      const relative = `memory/projects/${name}`
+      const document = await this.readDocument(relative)
+      if (document.body.trim() === '' && Object.keys(document.front).length === 0) continue
+      projects.push({
+        slug: name.slice(0, -3),
+        path: relative,
+        updated: frontString(document.front, 'updated', (await mtimeIso(this.path(relative))) ?? ''),
+        entries: parseEntries(document.body).length,
+      })
+    }
+    return projects.sort((a, b) => b.updated.localeCompare(a.updated))
+  }
+
+  /**
+   * Forget one project: its file moves to `archive/projects-<slug>-<day>.md`.
+   * A move, never a delete — same policy as decay and reset-all.
+   */
+  async archiveProject(slug: string): Promise<boolean> {
+    if (!/^[a-z0-9一-龥._-]{1,64}$/.test(slug)) return false
+    const source = this.path(`memory/projects/${slug}.md`)
+    if (!(await exists(source))) return false
+    const destination = this.path(`archive/projects-${slug}-${dayKey()}.md`)
+    await ensureDir(this.path('archive'))
+    await movePath(source, destination)
+    return true
+  }
+
   /** Session notes, newest first. */
   async readSessions(limit = 50): Promise<SessionNoteView[]> {
     const state = await this.readState()
@@ -677,12 +737,13 @@ export class MemoryStore {
   /** Build the snapshot the panel renders. */
   async snapshot(): Promise<MemorySnapshot> {
     await this.ensure()
-    const [preferences, state, sessions, drafts, allEntries] = await Promise.all([
+    const [preferences, state, sessions, drafts, allEntries, projects] = await Promise.all([
       this.readPreferences(),
       this.readState(),
       this.readSessions(),
       this.readDrafts(),
       this.readAllEntries(),
+      this.readProjects(),
     ])
     const documents: Record<string, DocumentView> = {}
     for (const target of documentTargets()) {
@@ -692,6 +753,17 @@ export class MemoryStore {
         text: document.body,
         revision: document.revision,
         updated: frontString(document.front, 'updated', ''),
+      }
+    }
+    // Project files ride in the same documents map (P6): the panel's project
+    // editor saves through the ordinary revision-checked route.
+    for (const project of projects) {
+      const document = await this.readDocument(project.path)
+      documents[project.path] = {
+        path: project.path,
+        text: document.body,
+        revision: document.revision,
+        updated: project.updated,
       }
     }
     const indexDocument = await this.readDocument('memory/index.md')
@@ -740,6 +812,7 @@ export class MemoryStore {
       questions: [...state.questions],
       history: await this.readHistory(),
       drafts,
+      projects,
       warnings: [...this.warnings],
     }
   }

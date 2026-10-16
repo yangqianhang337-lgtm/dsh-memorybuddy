@@ -309,6 +309,8 @@ async function runAction(host: RoutesHost, action: MemoryAction): Promise<unknow
       return { approved: await host.store.approveDraft(action.name) }
     case 'discard-draft':
       return { discarded: await host.store.discardDraft(action.name) }
+    case 'forget-project':
+      return { forgotten: await host.store.archiveProject(action.slug) }
     default:
       return { ignored: true }
   }

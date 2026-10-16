@@ -96,6 +96,11 @@ export interface Dictionary {
   'memory.sessionEvents': string
   'memory.sessionPending': string
   'memory.sessionDone': string
+  'memory.projects': string
+  'memory.projectsHint': string
+  'memory.projectsEmpty': string
+  'memory.projectEntries': string
+  'memory.projectForget': string
   'card.consolidateQuiet.title': string
   'card.consolidateQuiet.desc': string
   'schedule.startup-idle': string
@@ -149,6 +154,9 @@ export interface Dictionary {
   'confirm.forget.title': string
   'confirm.forget.body': string
   'confirm.forget.ok': string
+  'confirm.projectForget.title': string
+  'confirm.projectForget.body': string
+  'confirm.projectForget.ok': string
   'confirm.rollback.title': string
   'confirm.rollback.body': string
   'confirm.rollback.ok': string
@@ -253,6 +261,11 @@ const zh: Dictionary = {
   'memory.entriesEmpty': '还没有积累到条目。多聊几轮后会自动出现。',
   'memory.sessions': '最近的会话沉淀',
   'memory.sessionsEmpty': '还没有会话沉淀文件。',
+  'memory.projects': '项目记忆',
+  'memory.projectsHint': '每个工作目录一份记忆文件，只注入到对应项目的会话里。',
+  'memory.projectsEmpty': '还没有项目记忆。带工作目录的会话经过整理后会出现。',
+  'memory.projectEntries': '{count} 条',
+  'memory.projectForget': '归档此项目',
   'memory.sessionEvents': '{count} 条事件',
   'memory.sessionPending': '待整理',
   'memory.sessionDone': '已整理',
@@ -307,6 +320,9 @@ const zh: Dictionary = {
   'confirm.forget.title': '遗忘这条记忆？',
   'confirm.forget.body': '条目会被移入 archive/，可以人工恢复。',
   'confirm.forget.ok': '遗忘',
+  'confirm.projectForget.title': '归档这个项目记忆？',
+  'confirm.projectForget.body': '整个项目文件会移入 archive/，之后不再注入该项目的会话；可以人工移回。',
+  'confirm.projectForget.ok': '归档',
   'confirm.rollback.title': '回滚到这一天的备份？',
   'confirm.rollback.body': '当天备份覆盖的文件会被写回，回滚前的当前状态会先再备份一次。',
   'confirm.rollback.ok': '回滚',
@@ -409,6 +425,11 @@ const en: Dictionary = {
   'memory.entriesEmpty': 'Nothing accumulated yet. Entries show up after a few conversations.',
   'memory.sessions': 'Recent session notes',
   'memory.sessionsEmpty': 'No session notes yet.',
+  'memory.projects': 'Project memory',
+  'memory.projectsHint': 'One memory file per working directory, injected only into that project’s sessions.',
+  'memory.projectsEmpty': 'No project memory yet. It appears after sessions with a workspace are consolidated.',
+  'memory.projectEntries': '{count} entries',
+  'memory.projectForget': 'Archive project',
   'memory.sessionEvents': '{count} events',
   'memory.sessionPending': 'pending',
   'memory.sessionDone': 'consolidated',
@@ -464,6 +485,9 @@ const en: Dictionary = {
   'confirm.forget.title': 'Forget this memory?',
   'confirm.forget.body': 'The entry moves to archive/ and can be restored by hand.',
   'confirm.forget.ok': 'Forget',
+  'confirm.projectForget.title': 'Archive this project memory?',
+  'confirm.projectForget.body': 'The whole project file moves to archive/ and stops being injected into that project’s sessions; move it back by hand to restore.',
+  'confirm.projectForget.ok': 'Archive',
   'confirm.rollback.title': 'Roll back to that day?',
   'confirm.rollback.body':
     'Files covered by that day’s backup are written back, and the current state is backed up first.',

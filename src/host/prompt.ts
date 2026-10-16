@@ -43,6 +43,8 @@ export class PromptCache {
   private preferences: PreferencesView | undefined
   private documents = new Map<string, string>()
   private primed = false
+  /** The project file the last `watchProject` registered, re-read on every prime. */
+  private watched: string | undefined
 
   constructor(store: MemoryStore) {
     this.store = store
@@ -55,6 +57,13 @@ export class PromptCache {
     for (const relative of ['profile.md', 'instructions.md', 'memory/index.md']) {
       const document = await this.store.readDocument(relative)
       documents.set(relative, document.body)
+    }
+    // A consolidation pass can file new project facts between renders. The
+    // watched project file is re-read here so the next section text carries it
+    // without waiting for the workspace to change (P6 staleness fix).
+    if (this.watched !== undefined) {
+      const document = await this.store.readDocument(this.watched)
+      documents.set(this.watched, document.body)
     }
     this.preferences = preferences
     this.documents = documents
@@ -128,9 +137,17 @@ export class PromptCache {
     const slug = slugify(workspace)
     if (slug === '') return
     const relative = `memory/projects/${slug}.md`
-    if (this.documents.has(relative)) return
-    const document = await this.store.readDocument(relative)
-    this.documents.set(relative, document.body)
+    if (this.watched !== relative) {
+      this.watched = relative
+      const document = await this.store.readDocument(relative)
+      this.documents.set(relative, document.body)
+      return
+    }
+    // Same workspace as before: keep the existing copy (prime refreshes it).
+    if (!this.documents.has(relative)) {
+      const document = await this.store.readDocument(relative)
+      this.documents.set(relative, document.body)
+    }
   }
 }
 

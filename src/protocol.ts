@@ -198,6 +198,16 @@ export interface DraftView {
   repeats: number
 }
 
+/** One project memory file under `memory/projects/<slug>.md` (P6). */
+export interface ProjectView {
+  slug: string
+  /** Root-relative file path, for the panel's 编辑 link. */
+  path: string
+  updated: string
+  /** Entry count in the file (all confidences; the file itself is the source of truth). */
+  entries: number
+}
+
 /** Everything the panel renders, in one snapshot. */
 export interface MemorySnapshot {
   ok: true
@@ -231,6 +241,8 @@ export interface MemorySnapshot {
   /** Journal dates that have a backup, newest first — the rollback menu. */
   history: string[]
   drafts: DraftView[]
+  /** Project memory files (P6), newest-updated first. */
+  projects: ProjectView[]
   /** Non-fatal problems the panel should surface (e.g. a redacted secret). */
   warnings: string[]
 }
@@ -311,6 +323,7 @@ export type MemoryAction =
   | { kind: 'rollback'; date: string }
   | { kind: 'approve-draft'; name: string }
   | { kind: 'discard-draft'; name: string }
+  | { kind: 'forget-project'; slug: string }
 
 /** Save outcome. `conflict` carries the on-disk text so no edit is lost. */
 export type SaveResult =

@@ -27,6 +27,7 @@ import {
 import { TOPICS, type Confidence, type EntryView, type ModelRunView, type TopicKey } from '../protocol.ts'
 import { frontString, parseDocument } from './document.ts'
 import type { Distiller } from './distill.ts'
+import { extractProjectFacts, type ProjectCandidate } from './project.ts'
 import type { MemoryStore, PluginState } from './store.ts'
 
 /** A candidate lifted out of one session note. */
@@ -53,6 +54,10 @@ export interface ConsolidationReport {
   at: string
   /** What the model stage did, when it ran at all (§4.4). */
   model?: ModelRunView
+  /** Project facts filed into `memory/projects/` this pass (P6). */
+  projectAdded: number
+  projectMerged: number
+  projectFiles: string[]
 }
 
 /** Decay windows, in days (memory-plan §5.3). */
@@ -159,6 +164,9 @@ export class Consolidator {
       questions: [],
       files: [],
       at,
+      projectAdded: 0,
+      projectMerged: 0,
+      projectFiles: [],
     }
     if (this.running) {
       report.questions.push('上一次整理还在进行中，本次已跳过。')
@@ -186,12 +194,18 @@ export class Consolidator {
     // 1. Read every pending note into candidates. Nothing is written yet, so a
     //    failure here costs nothing.
     const candidates: Candidate[] = []
+    const projectCandidates: ProjectCandidate[] = []
     const consumed: string[] = []
     for (const relative of pending) {
       const document = await this.store.readDocument(relative)
       if (document.body.trim() === '' && Object.keys(document.front).length === 0) continue
       const date = frontString(document.front, 'started', today).slice(0, 10)
-      candidates.push(...candidatesFrom(document.body, relative, /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : today))
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : today
+      candidates.push(...candidatesFrom(document.body, relative, day))
+      // P6: the note's workspace front-matter decides which project file a
+      // `## 项目相关` fact belongs to; a note without one has no project.
+      const workspace = frontString(document.front, 'workspace', '')
+      projectCandidates.push(...extractProjectFacts(document.body, workspace, relative, day))
       consumed.push(relative)
       report.scanned += 1
     }
@@ -214,6 +228,11 @@ export class Consolidator {
       if (entries === undefined) continue
       this.applyCandidate(entries, candidate, report)
     }
+
+    // 3.1 Project memory (P6): file each `## 项目相关` fact into its project's
+    //     file. Runs before the model stage so a model op can still touch the
+    //     topics the project stage left alone — the two stages share no files.
+    await this.projectStage(projectCandidates, report)
 
     // 3.5 The model stage. It runs on the candidates the deterministic pass just
     //     consumed, and its operations go through the same merge path, so a
@@ -339,6 +358,103 @@ export class Consolidator {
       if (!next.includes(question)) next.push(question)
     }
     return next.slice(0, 50)
+  }
+
+  /**
+   * File project facts into `memory/projects/<slug>.md` (P6).
+   *
+   * The merge path is the topic path verbatim — `applyCandidate` works on any
+   * `Entry[]` — so a project fact gets the same dedupe, contradiction marking
+   * and confidence ladder as a habit. The only difference is the destination
+   * file, and that each project file is backed up and written independently.
+   *
+   * This method must never throw: a bad project line must not cost the pass
+   * its topic writes.
+   */
+  private async projectStage(candidates: readonly ProjectCandidate[], report: ConsolidationReport): Promise<void> {
+    if (candidates.length === 0) return
+    const bySlug = new Map<string, ProjectCandidate[]>()
+    for (const candidate of candidates) {
+      const list = bySlug.get(candidate.slug)
+      if (list === undefined) bySlug.set(candidate.slug, [candidate])
+      else list.push(candidate)
+    }
+    for (const [slug, facts] of bySlug) {
+      try {
+        await this.projectApply(slug, facts, report)
+      } catch (error) {
+        this.log(`项目记忆 ${slug} 整理失败：${String(error)}`)
+        report.questions.push(`项目记忆 ${slug} 整理失败：${String(error)}`)
+      }
+    }
+  }
+
+  /** Merge one slug's facts into its file. */
+  private async projectApply(
+    slug: string,
+    facts: readonly ProjectCandidate[],
+    report: ConsolidationReport,
+  ): Promise<void> {
+    const entries = await this.store.readProjectEntries(slug)
+    const before = JSON.stringify(entries.map(stripLine))
+    const counters = { added: 0, merged: 0, questions: [] as string[] }
+    for (const fact of facts) {
+      this.applyProjectCandidate(entries, fact, counters)
+    }
+    if (JSON.stringify(entries.map(stripLine)) === before) return
+    const relative = `memory/projects/${slug}.md`
+    await this.store.backup([relative])
+    await this.store.writeProjectEntries(slug, entries.map(stripLine))
+    report.projectAdded += counters.added
+    report.projectMerged += counters.merged
+    if (counters.questions.length > 0) report.questions.push(...counters.questions)
+    if (!report.projectFiles.includes(relative)) report.projectFiles.push(relative)
+  }
+
+  /** `applyCandidate` against a project file's counters. */
+  private applyProjectCandidate(entries: Entry[], candidate: ProjectCandidate, counters: { added: number; merged: number; questions: string[] }): void {
+    // Exactly the topic merge path; duplicated here only because
+    // `applyCandidate` counts into the topic fields of the shared report.
+    let best: Entry | undefined
+    let bestScore = 0
+    for (const entry of entries) {
+      const score = similarity(entry.text, candidate.text)
+      if (score > bestScore) {
+        bestScore = score
+        best = entry
+      }
+    }
+    if (best !== undefined && bestScore >= MERGE_THRESHOLD) {
+      if (best.pinned) return
+      best.days = new Set([...corroborationDates(best), candidate.date]).size
+      best.confidence = confidenceForDays(best.days)
+      if (best.last < candidate.date) best.last = candidate.date
+      if (candidate.date < best.first) best.first = candidate.date
+      if (!best.sources.includes(candidate.source)) best.sources.push(candidate.source)
+      counters.merged += 1
+      return
+    }
+    if (best !== undefined && contradicts(best.text, candidate.text)) {
+      if (!best.pinned) {
+        best.conflict = true
+        best.sources = [...new Set([...best.sources, candidate.source])]
+      }
+      counters.questions.push(`「${truncate(best.text)}」与「${truncate(candidate.text)}」互相矛盾，请在下一次整理时二选一。`)
+      return
+    }
+    entries.push({
+      id: entryId(candidate.text),
+      text: candidate.text,
+      confidence: '低',
+      days: 1,
+      first: candidate.date,
+      last: candidate.date,
+      sources: [candidate.source],
+      pinned: false,
+      conflict: false,
+      line: entries.length,
+    })
+    counters.added += 1
   }
 
   /**
@@ -479,6 +595,7 @@ export class Consolidator {
       `新增 ${report.added} 条 · 合并 ${report.merged} 条 · 冲突 ${report.conflicted} 条 · 归档 ${report.archived} 条`,
       `改写文件：${changed.length === 0 ? '（无）' : changed.map(topic => `memory/${topic.file}`).join('、')}`,
       ...this.modelLines(report),
+      ...this.projectLines(report),
     ]
     if (report.questions.length > 0) {
       lines.push(`待确认 ${report.questions.length} 项：`)
@@ -508,6 +625,14 @@ export class Consolidator {
     for (const failure of model.failures ?? []) lines.push(`候选失败：${failure}`)
     for (const rejection of model.rejected ?? []) lines.push(`被拒绝：${rejection}`)
     return lines
+  }
+
+  /** The journal's account of the project stage (P6). */
+  private projectLines(report: ConsolidationReport): string[] {
+    if (report.projectFiles.length === 0) return []
+    return [
+      `项目记忆：新增 ${report.projectAdded} 条 · 合并 ${report.projectMerged} 条（${report.projectFiles.join('、')}）`,
+    ]
   }
 }
 

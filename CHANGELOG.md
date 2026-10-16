@@ -5,6 +5,52 @@
 > 说明：0.1.0 一节保留发布当时的原文（那时本项目尚未正式命名），其中出现的旧名与旧工具名
 > 是当时的事实记录，不再改写；改名本身记录在 0.2.0 一节。
 
+## [0.5.0] - 2026-10-16
+
+**P6 项目级记忆**：整理时把会话笔记「项目相关」一节里的实事，按工作目录归档成每个项目一份的
+`memory/projects/<项目名>.md`——构建命令、约定、路径这类「只属于这个项目」的记忆，
+与四个主题记忆互相独立。只有工作目录匹配的会话才注入它的 `【本项目记忆】`。
+
+### 新增
+
+- **项目实事提取** `src/host/project.ts`：从会话笔记的 `## 项目相关` 一节逐行提取
+  （跳过 `（无）` 和「…：本会话的工作目录」自述行），slug 取工作目录**最后一段**（保留中文，最长 64 字符）；
+  工作目录为空的会话不产生候选。
+- **整理管线第 3.1 步** `src/host/consolidate.ts`：项目阶段排在确定性合并之后、模型提炼之前，
+  复用与主题记忆同一套合并（相似度 ≥0.75 判重）、冲突（矛盾上浮待确认）、置信度机制；
+  单个项目文件写失败不影响整轮整理（只记一条待确认问题）。整理报告新增
+  `projectAdded` / `projectMerged` / `projectFiles`，日志出现「项目记忆：新增 N 条 · 合并 M 条（…）」。
+- **存储层** `src/host/store.ts`：`readProjectEntries` / `writeProjectEntries`（带文件锁，
+  front `kind: project-memory`）/ `readProjects`（按更新时间倒序）/ `archiveProject`
+  （slug 白名单校验，移入 `archive/projects-<名>-<日期>.md`）；快照新增 `projects` 数组，
+  每个项目文件同时挂进 `documents` 供面板编辑。
+- **面板「项目记忆」卡片**：列出所有项目（名称 / 条数 / 更新日期），支持直接编辑整篇 markdown
+  （走普通 `/save` 通道，带修订校验），「归档此项目」二次确认后归档；中英文案齐备。
+- **`forget-project` action**：`POST /api/memorybuddy/action {"action":{"kind":"forget-project","slug":"…"}}`。
+- **注入修复** `src/host/prompt.ts`：`prime()` 现在会重读已登记的项目文件——
+  整理刚写入的项目实事，下一次会话注入就能带上，不用等工作目录变化。
+  `watchProject` 在工作目录**变化时**才登记（不变的不重复登记，prime 负责刷新）。
+
+### 验证
+
+| 检查 | 结果 |
+|---|---|
+| `npx tsc --noEmit -p tsconfig.json` | 通过 |
+| `node build.mjs` | `lib/index.js` 155.9 kb / `lib/client.js` 117.2 kb |
+| `tools/verify-project.mjs`（新增） | 16/16 |
+| `tools/verify-bundle.mjs` | 10/10 |
+| `tools/verify-client-factory.mjs` | 13/13 |
+| `tools/verify-headless.mjs` | 11 通过 / 0 失败 |
+| `tools/verify-host.mjs` | 49/49 |
+| `tools/verify-schedule.mjs` | 14/14 |
+| `tools/verify-model.mjs` | 30/30 |
+| `tools/verify-replay.mjs`（真实会话日志） | 14/14 |
+
+`verify-project.mjs` 覆盖：提取与合并进 `memory/projects/<slug>.md`、slug 映射（含中文路径）、
+自述行与 `（无）` 跳过、项目阶段对主题记忆是**加法**、重复实事合并不重复落行、
+仓库零污染（全部写入都留在 `$DSH_HOME`）、快照与归档回路、
+`【本项目记忆】` 只注入工作目录匹配的会话、整理写入的实事下一次 `prime()` 即生效。
+
 ## [0.4.0] - 2026-10-16
 
 **P5 模型提炼**：确定性整理（扫描、去重、重建索引）之后，第一次接上模型阶段——把候选交给模型做

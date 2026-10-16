@@ -32,6 +32,7 @@ import {
   type JournalView,
   type ModelCatalog,
   type MemorySnapshot,
+  type ProjectView,
   type SessionNoteView,
 } from '../protocol.ts'
 import { cx, panelCss as css } from './styles.ts'
@@ -312,6 +313,65 @@ function DraftCards({
   )
 }
 
+/**
+ * 项目记忆 (P6 §5): one card per project file under `memory/projects/`.
+ *
+ * The card lists what exists — slug, entry count, last update — and offers the
+ * two operations the plan gives it: 编辑 (the document editor, revision-checked
+ * like every other document) and 归档 (forget-project, which moves the file to
+ * archive/). The v1 collector only records a workspace's existence, so a young
+ * install shows the empty line rather than a greyed-out card.
+ */
+function ProjectsCard({
+  t,
+  projects,
+  busy,
+  onEdit,
+  onForget,
+}: {
+  t: Translate
+  projects: ProjectView[]
+  busy: boolean
+  onEdit: (path: string) => void
+  onForget: (slug: string) => void
+}): React.ReactElement {
+  return (
+    <Card title={t('memory.projects')} description={t('memory.projectsHint')}>
+      {projects.length === 0 ? (
+        <div className={css.proseEmpty}>{t('memory.projectsEmpty')}</div>
+      ) : (
+        <div className={cx(css.entries)}>
+          {projects.map(project => (
+            <div className={css.entry} key={project.slug}>
+              <div className={css.entryBody}>
+                <div className={css.entryText}>{project.slug}</div>
+                <div className={css.entryMeta}>
+                  <span>{t('memory.projectEntries', { count: String(project.entries) })}</span>
+                  <span>{project.updated.slice(0, 10)}</span>
+                </div>
+              </div>
+              <div className={css.entryActions}>
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => onEdit(project.path)}>
+                  {t('action.edit')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className={css.danger}
+                  disabled={busy}
+                  onClick={() => onForget(project.slug)}
+                >
+                  {t('memory.projectForget')}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 /** The memory page. */
 export function MemoryPage({
   t,
@@ -334,6 +394,9 @@ export function MemoryPage({
   })
   const [resetOpen, setResetOpen] = React.useState(false)
   const [forget, setForget] = React.useState<{ topic: string; id: string } | undefined>(undefined)
+  const [forgetProject, setForgetProject] = React.useState<string | undefined>(undefined)
+  const [projectDoc, setProjectDoc] = React.useState<string | undefined>(undefined)
+  const [projectDraft, setProjectDraft] = React.useState('')
   const [indexEditing, setIndexEditing] = React.useState(false)
   const [indexDraft, setIndexDraft] = React.useState('')
   const [rollbackDate, setRollbackDate] = React.useState<string | undefined>(undefined)
@@ -442,6 +505,25 @@ export function MemoryPage({
     const ok = await onAction({ kind: 'forget-entry', topic: target.topic, id: target.id })
     say(ok ? t('toast.forgotten') : t('toast.failed'), ok ? 'success' : 'danger')
   }, [forget, onAction, say, t])
+
+  const doForgetProject = React.useCallback(async (): Promise<void> => {
+    const slug = forgetProject
+    setForgetProject(undefined)
+    if (slug === undefined) return
+    const ok = await onAction({ kind: 'forget-project', slug })
+    say(ok ? t('toast.forgotten') : t('toast.failed'), ok ? 'success' : 'danger')
+  }, [forgetProject, onAction, say, t])
+
+  const documents = snapshot?.documents ?? {}
+  const projectView = projectDoc === undefined ? undefined : documents[projectDoc]
+  /** Save the open project document through the revision-checked host route. */
+  const saveProject = React.useCallback(async (): Promise<void> => {
+    const path = projectDoc
+    if (path === undefined) return
+    const ok = await onSaveDocument(path, projectDraft, projectView?.revision ?? '')
+    say(ok ? t('toast.saved') : t('toast.failed'), ok ? 'success' : 'danger')
+    if (ok) setProjectDoc(undefined)
+  }, [projectDoc, projectView, onSaveDocument, projectDraft, say, t])
 
   const doPin = React.useCallback(
     async (topic: string, id: string, pinned: boolean): Promise<void> => {
@@ -792,6 +874,58 @@ export function MemoryPage({
         </Card>
       )}
 
+      {/*
+        项目记忆 (P6 §5): one card per project file, after the history card.
+        The editor reuses the same DocumentBody as the index card with the
+        project file's own revision token.
+      */}
+      {!bare && (
+        <ProjectsCard
+          t={t}
+          projects={snapshot?.projects ?? []}
+          busy={busy}
+          onEdit={path => {
+            setProjectDoc(path)
+            setProjectDraft(documents[path]?.text ?? '')
+          }}
+          onForget={slug => setForgetProject(slug)}
+        />
+      )}
+      {projectDoc !== undefined && (
+        <Card title={projectDoc} description={t('memory.projectsHint')}>
+          <DocumentBody
+            t={t}
+            value={projectView?.text ?? ''}
+            draft={projectDraft}
+            onDraft={setProjectDraft}
+            editing
+            loading={loading}
+            renderPreview
+            tall
+            ariaLabel={projectDoc}
+            bodyTitle={projectDoc}
+            onKeyDown={event => {
+              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+                event.preventDefault()
+                void saveProject()
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setProjectDoc(undefined)
+              }
+            }}
+          />
+          <div className={css.entryActions}>
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => void saveProject()}>
+              {t('action.save')}
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={() => setProjectDoc(undefined)}>
+              {t('action.cancel')}
+            </Button>
+          </div>
+        </Card>
+      )}
+
       <DraftCards
         t={t}
         drafts={drafts}
@@ -907,6 +1041,15 @@ export function MemoryPage({
         cancelLabel={t('action.cancel')}
         onConfirm={() => void doForget()}
         onCancel={() => setForget(undefined)}
+      />
+      <Confirm
+        open={forgetProject !== undefined}
+        title={t('confirm.projectForget.title')}
+        body={`${t('confirm.projectForget.body')}（${forgetProject ?? ''}）`}
+        confirmLabel={t('confirm.projectForget.ok')}
+        cancelLabel={t('action.cancel')}
+        onConfirm={() => void doForgetProject()}
+        onCancel={() => setForgetProject(undefined)}
       />
       <Confirm
         open={rollbackDate !== undefined}

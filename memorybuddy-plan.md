@@ -1,18 +1,21 @@
 # MemoryBuddy 后续开发计划（memorybuddy-plan.md）
 
-> 状态：**P5 已交付（0.4.0），P6–P8 全部拍板完毕（§9，m04340），随时可开工 P6**
+> 状态：**P6 已交付（0.5.0），P7–P8 待开工**（§9 全部拍板：m04340）
 > 前置：`memory-plan.md` 的 **P0–P3 已交付**（0.1.0），项目已于 2026-10-16 更名为 **memorybuddy**（0.2.0，见 `update-plan.md`）。
 > 本文用途：把 `memory-plan.md` §9.2 的 P4–P8 路线图**按代码实况重新切分**，作为 P3 之后开发的唯一参照。
 > 与旧计划的关系：**本文覆盖并取代 `memory-plan.md` §9.2**；§9.1（P0–P3）已完成，仅作历史记录。
 >
 > **进度**：§3（P4 自动整合闭环）已于 0.3.0 交付；§4（P5 模型提炼）已于 0.4.0 交付，
 > 验收 30/30 + 全套回归绿 + 真机实测（真实模型调用成功、冷却/回退/白名单均验证）通过；
-> 下一阶段是 §5（P6 项目级记忆）。
+> §5（P6 项目级记忆）已于 0.5.0 交付（16/16 + 全套回归绿）；下一阶段是 §6（P7 技能进化）。
 >
 > **P5 实测要点**（详见 §4.8 结果列与 CHANGELOG 0.4.0）：`prepareCall` 句柄必须用**解析后配置**分发
 > （否则 `INVALID_PREPARED_CALL`）；消息 `content` 必须是**类型化块数组**（否则 `content.some is not a function`）；
 > 免费档必须与运行时枚举取交集（池账号不是运行时 provider）；`applied: 0`（确定性已合并、模型返回空 diff）
 > 是正常结果，不上浮问题。
+>
+> **P6 实测要点**（详见 §5.3 与 CHANGELOG 0.5.0）：slug 取工作目录**最后一段**（子目录是另一个项目，
+> 注入按目录精确匹配）；`prime()` 重读已登记的项目文件（整理写入当轮生效）；单项目写失败不影响整轮。
 
 ---
 
@@ -92,7 +95,7 @@ node tools/verify-replay.mjs <已结束的 18.5 MB 真实日志> → 14/14
 |---|---|---|---|---|---|
 | **P4** | 自动整合闭环 | 让已经能跑的确定性整合**自己跑起来**，并且**看得见、撤得回** | P6 前半 + 新 | 中 | ✅ 0.3.0 |
 | **P5** | 模型提炼 | 在 P4 的两阶段骨架上接模型阶段：**用户自选优先** → 免费优先候选链 → 冷却 → 失败降级 | P6 后半 | 大 | ✅ 0.4.0 |
-| **P6** | 项目级记忆 | `memory/projects/<slug>.md` 从只读变可写，并上 UI | 新 | 中 | ⬜ 下一阶段（**已拍板 m04340：默认开**，只写 `$DSH_HOME`） |
+| **P6** | 项目级记忆 | `memory/projects/<slug>.md` 从只读变可写，并上 UI | 新 | 中 | ✅ 0.5.0（已拍板 m04340：默认开，只写 `$DSH_HOME`） |
 | **P7** | 技能进化 | 草稿生成器（≥3 次 / ≥2 日期）+ 详情页 + 编辑后批准 + 30 天归档 | P7 前半 | 中 | ⬜ |
 | **P8** | 隐私收尾与发布 | 彻底删除、`no-memory`、PII、文档对齐、Gitee | P8 | 小 | ⬜ |
 
@@ -416,13 +419,17 @@ for await (const chunk of handle.stream({ ...handle.config, messages, system, si
 
 ### 5.3 验收标准
 
-| # | 验收 | 做法 |
-|---|---|---|
-| P6-1 | 自动积累 | 在 `D:\dsh-memorybuddy` 跑一个会话 → 整理后 `memory/projects/dsh-memorybuddy.md` 出现条目 |
-| P6-2 | 注入只在匹配目录 | 换一个工作目录开会话 → 系统提示里**没有** `【本项目记忆】` 段 |
-| P6-3 | 预算生效 | 把项目文件写到 5 KB → 注入被截到 1200 B |
-| P6-4 | 仓库零污染 | `git status --short` 在跑完整理后仍为空 |
-| P6-5 | 回归 | 五个 verifier 全绿 |
+| # | 验收 | 做法 | 结果 |
+|---|---|---|---|
+| P6-1 | 自动积累 | 在 `D:\dsh-memorybuddy` 跑一个会话 → 整理后 `memory/projects/dsh-memorybuddy.md` 出现条目 | ✅ `verify-project.mjs`：候选进项目文件（`projectAdded:1`），主题记忆照常（加法），重复实事合并不重复落行 |
+| P6-2 | 注入只在匹配目录 | 换一个工作目录开会话 → 系统提示里**没有** `【本项目记忆】` 段 | ✅ 同上：`C:\somewhere-else` 渲染无该段，`D:\dsh-memorybuddy` 渲染注入 175 B |
+| P6-3 | 预算生效 | 把项目文件写到 5 KB → 注入被截到 1200 B | ✅ `renderProject` 的 `clamp(body, 1200)` 沿用未改（P0 既有测试覆盖 clamp 按行边界截 UTF-8 字节） |
+| P6-4 | 仓库零污染 | `git status --short` 在跑完整理后仍为空 | ✅ 同上：通过检查只过滤 pass 写入（`memory|sessions|journal|archive|state.json`），仓库无此类新增 |
+| P6-5 | 回归 | 五个 verifier 全绿 | ✅ 实际八个全绿（见 §8.3 基线 0.5.0），含新 `verify-project.mjs` 16/16 |
+
+**P6 实测要点（0.5.0）**：slug 取工作目录**最后一段**——子目录是另一个项目（`D:\repo\sub` → `sub.md`），
+所以注入按目录**精确匹配**而不是前缀匹配；`prime()` 重读已登记的项目文件（P6 注入时效修复，
+整理刚写入的实事下一次注入就带上）；单项目写失败不影响整轮整理（只上浮一条待确认问题）。
 
 ---
 
@@ -553,10 +560,11 @@ node tools/verify-headless.mjs         # 期望 11 passed, 0 failed
 node tools/verify-host.mjs             # 期望 49/49（P4 后；此前 35/35）
 node tools/verify-schedule.mjs         # 期望 14/14（P4 新增）
 node tools/verify-model.mjs            # 期望 30/30（P5 新增）
+node tools/verify-project.mjs          # 期望 16/16（P6 新增）
 node tools/verify-replay.mjs "C:\Users\A3373\.dsh\sessions\--D-dsh-workbuddy-memory--\session-ebae0951-2d5d-40f2-bc44-21f65142d9a9\session.v4.jsonl.zstd"   # 期望 14/14
 ```
 
-> 最后一条**必须用已结束的日志**（见陷阱 8）。上表基线为 2026-10-16（0.4.0）实测值，新增功能后只应上升不应下降。
+> 最后一条**必须用已结束的日志**（见陷阱 8）。上表基线为 2026-10-16（0.5.0）实测值，新增功能后只应上升不应下降。
 
 **真机验收（改动宿主半边后必须做一次）**：`verify-*.mjs` 跑的是打桩宿主，抓不到「路由是否真的注册上」「面板卡片是否真的渲染」这类问题。做法见陷阱 15。
 
